@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, 'feature/**' ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    # 테스트가 @SpringBootTest라 실제 DB가 필요하다.
+    # GitHub Actions가 MySQL 컨테이너를 띄워주고, 끝나면 알아서 정리한다.
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: rootpw
+          MYSQL_DATABASE: policy
+          MYSQL_USER: policy
+          MYSQL_PASSWORD: policypw
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -prootpw"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=15
+
+    steps:
+      - name: 소스 체크아웃
+        uses: actions/checkout@v4
+
+      - name: JDK 21 설치
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: 빌드 + 테스트
+        run: ./gradlew build --no-daemon
+        env:
+          SPRING_DATASOURCE_URL: jdbc:mysql://127.0.0.1:3306/policy?characterEncoding=UTF-8&serverTimezone=Asia/Seoul
+          MYSQL_USER: policy
+          MYSQL_PASSWORD: policypw
+
+      - name: 테스트 리포트 보관
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: build/reports/tests/test
+          if-no-files-found: ignore
