@@ -2,8 +2,10 @@ package kr.hojun.policymatch;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 
 @SpringBootApplication
+@ConfigurationPropertiesScan
 public class PolicyMatchApplication {
 
 	public static void main(String[] args) {
