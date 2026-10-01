@@ -5,84 +5,379 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>청년정책 매칭</title>
 <style>
-  body { font-family: -apple-system, sans-serif; max-width: 720px;
-         margin: 40px auto; padding: 0 16px; line-height: 1.6; }
-  h1 { font-size: 22px; }
-  form { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap;
-         padding: 16px; background: #f5f5f5; border-radius: 8px; }
-  label { display: flex; flex-direction: column; font-size: 13px; gap: 4px; }
-  input, select { padding: 8px; font-size: 15px; border: 1px solid #ccc;
-                  border-radius: 4px; }
-  button { padding: 9px 20px; font-size: 15px; border: 0; border-radius: 4px;
-           background: #1a5fb4; color: #fff; cursor: pointer; }
-  #status { color: #666; font-size: 14px; }
-  ul { list-style: none; padding: 0; }
-  li { padding: 12px; border-bottom: 1px solid #eee; }
-  .tag { display: inline-block; font-size: 12px; background: #e8f0fe;
-         color: #1a5fb4; padding: 2px 8px; border-radius: 10px; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 24px 16px 64px;
+    line-height: 1.6;
+    color: #222;
+    background: #fafafa;
+  }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .subtitle { color: #666; font-size: 14px; margin: 0 0 20px; }
+
+  form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    padding: 18px;
+    background: #fff;
+    border: 1px solid #eee;
+    border-radius: 10px;
+  }
+  .field { display: flex; flex-direction: column; gap: 5px; flex: 1 1 140px; }
+  .field label { font-size: 13px; color: #555; }
+  .field .hint { font-size: 11px; color: #999; }
+  input, select {
+    padding: 9px 10px;
+    font-size: 15px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    width: 100%;
+    background: #fff;
+  }
+  .actions { flex: 1 1 100%; }
+  button {
+    padding: 11px 24px;
+    font-size: 15px;
+    border: 0;
+    border-radius: 6px;
+    background: #1a5fb4;
+    color: #fff;
+    cursor: pointer;
+    width: 100%;
+  }
+  button:disabled { background: #9db8d8; cursor: default; }
+
+  #error {
+    color: #c0192b;
+    font-size: 14px;
+    margin: 14px 2px 0;
+    min-height: 1px;
+  }
+  #summary { font-size: 16px; font-weight: 700; margin: 26px 2px 12px; }
+
+  #results { list-style: none; padding: 0; margin: 0; display: grid; gap: 14px; }
+  .card {
+    background: #fff;
+    border: 1px solid #eee;
+    border-radius: 10px;
+    padding: 16px;
+  }
+  .card .title { font-weight: 700; font-size: 16px; }
+  .card .category { font-size: 12px; color: #888; margin-top: 2px; }
+
+  .badge-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .badge {
+    display: inline-block;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 12px;
+    white-space: nowrap;
+  }
+  .badge-met { background: #e4f6e6; color: #1b7a2e; }
+  .badge-not-met { background: #fbe4e4; color: #c0192b; }
+  .badge-unknown { background: #ececec; color: #666; }
+  .badge-note { font-size: 12px; color: #888; }
+
+  .income-note { font-size: 13px; color: #555; margin-top: 8px; }
+  .needs-check {
+    display: inline-block;
+    font-size: 12px;
+    font-weight: 600;
+    background: #fff4d6;
+    color: #8a6400;
+    padding: 3px 10px;
+    border-radius: 12px;
+    margin-top: 10px;
+  }
+  .meta { font-size: 13px; color: #444; margin-top: 10px; }
+  .links { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 14px; }
+  .links a { color: #1a5fb4; font-size: 14px; }
+
+  details { margin-top: 12px; }
+  summary { cursor: pointer; font-size: 14px; color: #1a5fb4; }
+  .support-content {
+    white-space: pre-line;
+    font-size: 14px;
+    color: #333;
+    margin-top: 8px;
+  }
 </style>
 </head>
 <body>
 
 <h1>청년정책 매칭</h1>
+<p class="subtitle">나이·시도·소득을 입력하면 받을 수 있는 정책을 찾아드립니다.</p>
 
 <form id="search-form">
-  <label>나이
-    <input type="number" id="age" min="15" max="45" value="25" required>
-  </label>
-  <label>지역
-    <select id="sido">
-      <option value="">전체</option>
-      <option>서울특별시</option><option>부산광역시</option>
-      <option>대구광역시</option><option>인천광역시</option>
-      <option>광주광역시</option><option>대전광역시</option>
-      <option>울산광역시</option><option>세종특별자치시</option>
-      <option>경기도</option><option>강원특별자치도</option>
-      <option>충청북도</option><option>충청남도</option>
-      <option>전북특별자치도</option><option>전라남도</option>
-      <option>경상북도</option><option>경상남도</option>
-      <option>제주특별자치도</option>
+  <div class="field">
+    <label for="age">나이 (필수)</label>
+    <input type="number" id="age" min="0" max="120" step="1" placeholder="예: 25" required>
+  </div>
+  <div class="field">
+    <label for="sido">시도 (필수)</label>
+    <select id="sido" required>
+      <option value="">시도를 선택하세요</option>
     </select>
-  </label>
-  <button type="submit">정책 찾기</button>
+  </div>
+  <div class="field">
+    <label for="income">연소득 (선택)</label>
+    <input type="number" id="income" min="0" step="1" placeholder="단위: 만원">
+    <span class="hint">비워두면 소득 조건 없이 조회합니다.</span>
+  </div>
+  <div class="actions">
+    <button type="submit" id="submit-btn">정책 찾기</button>
+  </div>
 </form>
 
-<p id="status"></p>
-<ul id="result"></ul>
+<p id="error"></p>
+<p id="summary"></p>
+<ul id="results"></ul>
 
 <script>
-const form = document.getElementById('search-form');
-const status = document.getElementById('status');
-const result = document.getElementById('result');
+(function () {
+  "use strict";
 
-form.addEventListener('submit', async (event) => {
-  event.preventDefault();
+  const form = document.getElementById("search-form");
+  const ageInput = document.getElementById("age");
+  const sidoSelect = document.getElementById("sido");
+  const incomeInput = document.getElementById("income");
+  const submitBtn = document.getElementById("submit-btn");
+  const errorEl = document.getElementById("error");
+  const summaryEl = document.getElementById("summary");
+  const resultsEl = document.getElementById("results");
 
-  const age = document.getElementById('age').value;
-  const sido = document.getElementById('sido').value || '전체';
+  // ---- 유틸 ----------------------------------------------------------------
 
-  status.textContent = '조회 중...';
-  result.innerHTML = '';
-
-  try {
-    const response = await fetch('/api/v1/policies');
-    if (!response.ok) throw new Error('HTTP ' + response.status);
-    const policies = await response.json();
-
-    status.textContent =
-      `입력 조건: ${age}세 / ${sido} — 총 ${policies.length}건 (조건 필터는 9/22 연결 예정)`;
-
-    for (const p of policies) {
-      const li = document.createElement('li');
-      li.innerHTML =
-        `<strong>${p.title}</strong> <span class="tag">${p.categoryLarge ?? '미분류'}</span>`
-        + `<br><small>${p.minAge ?? '-'}세 ~ ${p.maxAge ?? '-'}세 · ${p.policyNo}</small>`;
-      result.appendChild(li);
-    }
-  } catch (error) {
-    status.textContent = '오류: ' + error.message;
+  // HTML 엔티티(&middot; 등)를 실제 문자로 디코딩
+  function decodeEntities(text) {
+    if (text == null) return "";
+    return new DOMParser()
+      .parseFromString(String(text), "text/html")
+      .documentElement.textContent;
   }
-});
+
+  // supportContent: 엔티티 디코딩 + 글자 그대로의 "\n"을 실제 개행으로 변환
+  function cleanSupportContent(text) {
+    return decodeEntities(text).replace(/\\n/g, "\n");
+  }
+
+  // http(s) 로 시작하는 URL일 때만 안전한 링크 생성, 아니면 null
+  function createLink(url, label) {
+    if (typeof url !== "string") return null;
+    if (!/^https?:\/\//i.test(url)) return null;
+    const a = document.createElement("a");
+    a.href = url;
+    a.textContent = label;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    return a;
+  }
+
+  function clearError() { errorEl.textContent = ""; }
+  function showError(msg) { errorEl.textContent = msg; }
+
+  // ---- 시도 목록 로드 (페이지 로드 시) -------------------------------------
+
+  async function loadSido() {
+    try {
+      const response = await fetch("/api/v1/regions/sido");
+      if (!response.ok) {
+        showError("시도 목록을 불러오지 못했습니다.");
+        return;
+      }
+      const list = await response.json();
+      if (!Array.isArray(list)) return;
+
+      for (const item of list) {
+        const option = document.createElement("option");
+        option.value = item.code;        // value = code
+        option.textContent = item.name;  // 표시 = name
+        sidoSelect.appendChild(option);
+      }
+    } catch (e) {
+      showError("서버에 연결할 수 없습니다");
+    }
+  }
+
+  // ---- 소득 뱃지 -----------------------------------------------------------
+
+  const BADGE = {
+    MET:      { text: "소득 충족",   cls: "badge-met" },
+    NOT_MET:  { text: "소득 미충족", cls: "badge-not-met" },
+    UNKNOWN:  { text: "소득 판단불가", cls: "badge-unknown" }
+  };
+
+  // ---- 정책 카드 생성 ------------------------------------------------------
+
+  function createCard(policy) {
+    const li = document.createElement("li");
+    li.className = "card";
+
+    // 제목
+    const title = document.createElement("div");
+    title.className = "title";
+    title.textContent = policy.title != null ? policy.title : "";
+    li.appendChild(title);
+
+    // 카테고리: "대분류 > 중분류"
+    const category = document.createElement("div");
+    category.className = "category";
+    const large = policy.categoryLarge != null ? policy.categoryLarge : "";
+    const medium = policy.categoryMedium != null ? policy.categoryMedium : "";
+    category.textContent = medium ? (large + " > " + medium) : large;
+    li.appendChild(category);
+
+    // 소득 뱃지 + (UNKNOWN일 때) 설명
+    const badgeRow = document.createElement("div");
+    badgeRow.className = "badge-row";
+
+    const badgeInfo = BADGE[policy.incomeStatus] || BADGE.UNKNOWN;
+    const badge = document.createElement("span");
+    badge.className = "badge " + badgeInfo.cls;
+    badge.textContent = badgeInfo.text;
+    badgeRow.appendChild(badge);
+
+    if (policy.incomeStatus === "UNKNOWN") {
+      const note = document.createElement("span");
+      note.className = "badge-note";
+      note.textContent =
+        "판단불가는 소득 조건을 자동으로 확인할 수 없다는 뜻입니다. 원문을 확인하세요.";
+      badgeRow.appendChild(note);
+    }
+    li.appendChild(badgeRow);
+
+    // incomeNote (null이 아니면 그대로 표시)
+    if (policy.incomeNote != null) {
+      const incomeNote = document.createElement("div");
+      incomeNote.className = "income-note";
+      incomeNote.textContent = policy.incomeNote;
+      li.appendChild(incomeNote);
+    }
+
+    // needsCheck
+    if (policy.needsCheck === true) {
+      const needs = document.createElement("div");
+      needs.className = "needs-check";
+      needs.textContent = "추가 자격 확인 필요";
+      li.appendChild(needs);
+    }
+
+    // 신청기간
+    if (policy.applyPeriodText != null) {
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      meta.textContent = "신청기간: " + policy.applyPeriodText;
+      li.appendChild(meta);
+    }
+
+    // 링크 (applyUrl → 신청하기, refUrl → 참고 링크)
+    const applyLink = createLink(policy.applyUrl, "신청하기");
+    const refLink = createLink(policy.refUrl, "참고 링크");
+    if (applyLink || refLink) {
+      const links = document.createElement("div");
+      links.className = "links";
+      if (applyLink) links.appendChild(applyLink);
+      if (refLink) links.appendChild(refLink);
+      li.appendChild(links);
+    }
+
+    // 지원 내용 (접기)
+    if (policy.supportContent != null) {
+      const details = document.createElement("details");
+      const summary = document.createElement("summary");
+      summary.textContent = "지원 내용 보기";
+      details.appendChild(summary);
+
+      const content = document.createElement("div");
+      content.className = "support-content";
+      content.textContent = cleanSupportContent(policy.supportContent);
+      details.appendChild(content);
+
+      li.appendChild(details);
+    }
+
+    return li;
+  }
+
+  // ---- 결과 렌더링 ---------------------------------------------------------
+
+  function renderResults(data) {
+    resultsEl.textContent = "";
+    const count = typeof data.count === "number" ? data.count : 0;
+
+    if (count === 0) {
+      summaryEl.textContent = "조건에 맞는 정책이 없습니다";
+      return;
+    }
+
+    summaryEl.textContent = "총 " + count + "건";
+    const policies = Array.isArray(data.policies) ? data.policies : [];
+    for (const policy of policies) {
+      resultsEl.appendChild(createCard(policy));
+    }
+  }
+
+  // ---- 폼 제출 (매칭 API) --------------------------------------------------
+
+  form.addEventListener("submit", async function (event) {
+    event.preventDefault();
+    clearError();
+    summaryEl.textContent = "";
+    resultsEl.textContent = "";
+
+    // 요청 바디 구성
+    const body = {
+      age: Number(ageInput.value),
+      sido: sidoSelect.value
+    };
+
+    // income: 입력칸이 비어 있으면 키 자체를 뺀다
+    const incomeRaw = incomeInput.value.trim();
+    if (incomeRaw !== "") {
+      body.income = Number(incomeRaw);
+    }
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = "검색 중...";
+
+    try {
+      const response = await fetch("/api/v1/policies/match", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+
+      const data = await response.json().catch(function () { return null; });
+
+      if (!response.ok) {
+        const msg = data && data.message ? data.message : "요청을 처리하지 못했습니다.";
+        showError(msg);
+        return;
+      }
+
+      renderResults(data || {});
+    } catch (e) {
+      showError("서버에 연결할 수 없습니다");
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = "정책 찾기";
+    }
+  });
+
+  // 초기화
+  loadSido();
+})();
 </script>
 
 </body>
