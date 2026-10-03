@@ -1,0 +1,14 @@
+services:
+  app:
+    image: lhjunkr/policy-match:1.1
+    container_name: policy-app
+    restart: unless-stopped
+    environment:
+      SPRING_DATASOURCE_URL: ${SPRING_DATASOURCE_URL}
+      SPRING_DATASOURCE_USERNAME: ${SPRING_DATASOURCE_USERNAME}
+      SPRING_DATASOURCE_PASSWORD: ${SPRING_DATASOURCE_PASSWORD}
+      YOUTH_API_KEY: ${YOUTH_API_KEY}
+      ADMIN_TOKEN: ${ADMIN_TOKEN}
+      TZ: Asia/Seoul
+    ports:
+      - "8080:8080"
