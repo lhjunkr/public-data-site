@@ -53,3 +53,37 @@ jobs:
           name: test-results
           path: build/reports/tests/test
           if-no-files-found: ignore
+
+  # ---------- CD 1단계: 이미지 빌드 + 푸시 (D-013) ----------
+  docker:
+    # build(테스트)가 성공해야 실행된다. 실패하면 이 job은 건너뛴다.
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 소스 체크아웃
+        uses: actions/checkout@v4
+
+      # 비밀번호 대신 액세스 토큰으로 로그인한다. 토큰 값은 GitHub Secrets에만 있다.
+      - name: Docker Hub 로그인
+        uses: docker/login-action@v4
+        with:
+          username: lhjunkr
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Buildx 준비
+        uses: docker/setup-buildx-action@v4
+
+      # 커밋 SHA 40자 중 앞 7자를 이미지 태그로 쓴다. 예: 0f7465f
+      - name: 태그 계산
+        id: tag
+        run: echo "sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      # 러너가 x86이라 맥에서처럼 --platform linux/amd64 를 붙일 필요가 없다.
+      - name: 이미지 빌드 + 푸시
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: lhjunkr/policy-match:${{ steps.tag.outputs.sha }}
