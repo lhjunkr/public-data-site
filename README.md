@@ -208,5 +208,6 @@ docker compose up -d
 - [`docs/decisions.md`](docs/decisions.md) — 설계 결정 기록 (D-001 ~ D-012)
 - [`docs/adr/ADR-001.md`](docs/adr/ADR-001.md) — 조인 테이블 채택 근거
 - [`docs/erd.md`](docs/erd.md) — ERD와 API 필드 매핑
+- [`docs/retrospective.md`](docs/retrospective.md) — 9월 회고 (계획과 실제, 틀렸던 것과 원인)
 
 데이터 출처: 온통청년 (한국고용정보원)
