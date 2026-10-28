@@ -13,6 +13,10 @@ RUN chmod +x gradlew && ./gradlew bootJar --no-daemon
 FROM eclipse-temurin:21-jre
 WORKDIR /app
 
+# 이미지를 만든 커밋 7자리. CI 가 --build-arg 로 넣고, /health 가 이 값을 보여 준다. 로컬 빌드는 local.
+ARG APP_VERSION=local
+ENV APP_VERSION=${APP_VERSION}
+
 COPY --from=builder /app/build/libs/*.jar app.jar
 
 EXPOSE 8080

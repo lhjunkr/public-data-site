@@ -82,7 +82,7 @@ flowchart LR
 
 | 메서드 | 경로 | 설명 |
 |---|---|---|
-| `GET` | `/health` | 상태 확인 |
+| `GET` | `/health` | 상태 확인 · 실행 중인 버전(커밋 7자리) |
 | `GET` | `/api/v1/regions/sido` | 시도 코드 · 이름 목록 |
 | `POST` | `/api/v1/policies/match` | 조건에 맞는 정책 매칭 |
 | `GET` | `/api/v1/policies` | 정규화된 정책 전체 목록 |
@@ -205,7 +205,7 @@ docker compose up -d
 
 ## 문서
 
-- [`docs/decisions.md`](docs/decisions.md) — 설계 결정 기록 (D-001 ~ D-012)
+- [`docs/decisions.md`](docs/decisions.md) — 설계 결정 기록
 - [`docs/adr/ADR-001.md`](docs/adr/ADR-001.md) — 조인 테이블 채택 근거
 - [`docs/erd.md`](docs/erd.md) — ERD와 API 필드 매핑
 - [`docs/retrospective.md`](docs/retrospective.md) — 9월 회고 (계획과 실제, 틀렸던 것과 원인)

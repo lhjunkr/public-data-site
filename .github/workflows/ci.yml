@@ -87,6 +87,8 @@ jobs:
           context: .
           push: true
           tags: lhjunkr/policy-match:${{ steps.tag.outputs.sha }}
+          # 이미지 안에 커밋 7자리를 새겨 둔다. 서버의 /health 가 이 값을 보여 준다.
+          build-args: APP_VERSION=${{ steps.tag.outputs.sha }}
 
   # ---------- CD 2단계: 서버 반영 (D-013) ----------
   deploy:
@@ -114,14 +116,18 @@ jobs:
       - name: 서버에서 deploy.sh 실행
         run: ssh -i ~/.ssh/deploy_key ubuntu@161.33.139.178 "cd ~/policy && ./deploy.sh ${GITHUB_SHA::7}"
 
-      # 서버 안(localhost)뿐 아니라 인터넷 바깥에서도 공개 URL이 응답하는지 확인한다.
+      # 인터넷 바깥에서 공개 URL을 불러, 방금 배포한 커밋 7자리가 실제로 돌고 있는지 확인한다.
       - name: 공개 URL 확인
         run: |
+          EXPECTED="\"version\":\"${GITHUB_SHA::7}\""
           for _ in $(seq 1 10); do
-            if curl -fs http://161.33.139.178:8080/health; then
+            BODY=$(curl -fs http://161.33.139.178:8080/health || true)
+            echo "응답: ${BODY}"
+            if [[ "$BODY" == *"$EXPECTED"* ]]; then
+              echo "공개 URL 확인: ${GITHUB_SHA::7}"
               exit 0
             fi
             sleep 5
           done
-          echo "공개 URL이 50초 안에 응답하지 않음"
+          echo "공개 URL이 50초 안에 새 버전(${GITHUB_SHA::7})으로 응답하지 않음"
           exit 1
