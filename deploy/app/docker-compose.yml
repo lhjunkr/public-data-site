@@ -1,6 +1,6 @@
 services:
   app:
-    image: lhjunkr/policy-match:1.1
+    image: lhjunkr/policy-match:${APP_TAG}
     container_name: policy-app
     restart: unless-stopped
     environment:
