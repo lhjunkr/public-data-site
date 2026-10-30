@@ -1,5 +1,6 @@
 package kr.hojun.policymatch.match;
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -46,6 +47,10 @@ class PolicyMatchApiIntegrationTest {
                 INSERT INTO policy_category (policy_id, category_code)
                 SELECT id, 'housing.rent' FROM policy WHERE policy_no = 'T-API'
                 """);
+        jdbc.update("""
+                INSERT INTO policy_job (policy_id, job_code)
+                SELECT id, '0013001' FROM policy WHERE policy_no = 'T-API'
+                """);
     }
 
     @Test
@@ -58,6 +63,31 @@ class PolicyMatchApiIntegrationTest {
                 .andExpect(jsonPath("$.policies[0].title").value("T-API"))
                 .andExpect(jsonPath("$.policies[0].incomeStatus").value("NOT_MET"))
                 .andExpect(jsonPath("$.policies[0].categories[0]").value("housing.rent"));
+    }
+
+    @Test
+    void 취업_상태가_맞지_않으면_결과에서_빠진다() throws Exception {
+        // T-API 는 재직자(0013001) 전용
+        mvc.perform(post("/api/v1/policies/match")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"age\":25,\"sido\":\"99\",\"job\":\"0013003\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.count").value(0));
+
+        mvc.perform(post("/api/v1/policies/match")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"age\":25,\"sido\":\"99\",\"job\":\"0013001\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.count").value(1));
+    }
+
+    @Test
+    void 취업_상태_목록은_제한없음을_빼고_화면_순서대로_준다() throws Exception {
+        mvc.perform(get("/api/v1/job-statuses"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(9))
+                .andExpect(jsonPath("$[0].code").value("0013003"))
+                .andExpect(jsonPath("$[0].name").value("미취업자"));
     }
 
     @Test

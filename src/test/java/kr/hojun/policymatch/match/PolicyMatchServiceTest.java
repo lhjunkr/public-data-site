@@ -23,7 +23,7 @@ class PolicyMatchServiceTest {
         public boolean sidoExists(String sido) { return "11".equals(sido); }
 
         @Override
-        public List<MatchedPolicy> match(int age, String sido, Long income) { return List.of(); }
+        public List<MatchedPolicy> match(int age, String sido, Long income, String job) { return List.of(); }
     }
 
     private final PolicyMatchService service = new PolicyMatchService(new FakeRepository());
@@ -44,36 +44,51 @@ class PolicyMatchServiceTest {
 
     @Test
     void 나이가_없으면_400() {
-        assertBadRequest(new MatchRequest(null, "11", null));
+        assertBadRequest(new MatchRequest(null, "11", null, null));
     }
 
     @Test
     void 나이_경계_0과_120은_통과_범위_밖은_400() {
-        assertBadRequest(new MatchRequest(-1, "11", null));
-        assertAccepted(new MatchRequest(0, "11", null));
-        assertAccepted(new MatchRequest(120, "11", null));
-        assertBadRequest(new MatchRequest(121, "11", null));
+        assertBadRequest(new MatchRequest(-1, "11", null, null));
+        assertAccepted(new MatchRequest(0, "11", null, null));
+        assertAccepted(new MatchRequest(120, "11", null, null));
+        assertBadRequest(new MatchRequest(121, "11", null, null));
     }
 
     @Test
     void 시도는_두자리_숫자만_통과() {
-        assertBadRequest(new MatchRequest(25, null, null));
-        assertBadRequest(new MatchRequest(25, "1", null));
-        assertBadRequest(new MatchRequest(25, "111", null));
-        assertBadRequest(new MatchRequest(25, "ab", null));
-        assertAccepted(new MatchRequest(25, "11", null));
+        assertBadRequest(new MatchRequest(25, null, null, null));
+        assertBadRequest(new MatchRequest(25, "1", null, null));
+        assertBadRequest(new MatchRequest(25, "111", null, null));
+        assertBadRequest(new MatchRequest(25, "ab", null, null));
+        assertAccepted(new MatchRequest(25, "11", null, null));
     }
 
     @Test
     void 형식은_맞아도_없는_시도코드는_400() {
         // 9/25 실측: 옛 전남 코드 46 은 조용히 0건이 나왔다 → 오류로 알려야 한다
-        assertBadRequest(new MatchRequest(25, "46", null));
+        assertBadRequest(new MatchRequest(25, "46", null, null));
     }
 
     @Test
     void 소득_경계_0은_통과_음수는_400_생략은_통과() {
-        assertBadRequest(new MatchRequest(25, "11", -1L));
-        assertAccepted(new MatchRequest(25, "11", 0L));
-        assertAccepted(new MatchRequest(25, "11", null));
+        assertBadRequest(new MatchRequest(25, "11", -1L, null));
+        assertAccepted(new MatchRequest(25, "11", 0L, null));
+        assertAccepted(new MatchRequest(25, "11", null, null));
+    }
+
+    @Test
+    void 취업_상태는_공식_코드표의_선택지만_통과_생략도_통과() {
+        assertAccepted(new MatchRequest(25, "11", null, "0013003"));   // 미취업자
+        assertAccepted(new MatchRequest(25, "11", null, "0013009"));   // 기타
+        assertAccepted(new MatchRequest(25, "11", null, null));
+        assertBadRequest(new MatchRequest(25, "11", null, "0013011"));
+        assertBadRequest(new MatchRequest(25, "11", null, "미취업자"));
+        assertBadRequest(new MatchRequest(25, "11", null, ""));
+    }
+
+    @Test
+    void 제한없음은_정책_쪽_값이라_사용자_입력으로는_400() {
+        assertBadRequest(new MatchRequest(25, "11", null, "0013010"));
     }
 }

@@ -15,7 +15,8 @@ import org.springframework.web.context.WebApplicationContext;
 
 /**
  * 실제 묶음표(application.yml)를 읽어 시험한다 (D-018).
- * 10/30 측정에서 나온 원본 중분류 19개가 모두 칩에 들어 있는지, API 가 닫힌 탭을 숨기는지 본다.
+ * 10/30 측정에서 나온 원본 중분류 19개가 모두 칩에 들어 있는지, API 가 열린 탭을 화면 순서대로 주는지 본다.
+ * 측정 19개는 온통청년 공식 중분류 17개(API코드정보.xlsx)에 이름이 바뀐 2개를 더한 것이다.
  */
 @SpringBootTest
 class CategoryConfigTest {
@@ -44,7 +45,8 @@ class CategoryConfigTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].code").value("housing"))
                 .andExpect(jsonPath("$[0].chips[0].code").value("housing.rent"))
-                .andExpect(jsonPath("$.length()").value(4))            // 일자리(닫힘) 제외 4개
-                .andExpect(jsonPath("$[3].code").value("participation"));
+                .andExpect(jsonPath("$.length()").value(5))            // D-021 로 일자리까지 5개 모두 열림
+                .andExpect(jsonPath("$[3].code").value("participation"))
+                .andExpect(jsonPath("$[4].code").value("jobs"));
     }
 }
