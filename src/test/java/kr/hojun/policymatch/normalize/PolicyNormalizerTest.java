@@ -59,6 +59,22 @@ class PolicyNormalizerTest {
     }
 
     @Test
+    void 원_단위_소득_금액은_만원으로_바꿔_저장한다() {
+        // 10/30 측정: 상한 5,000(만원)과 43,056,240(원)이 섞여 있었다 (D-016)
+        jdbc.update("UPDATE policy_raw SET raw_json = JSON_SET(raw_json, '$.earnCndSeCd', '0043002', "
+                + "'$.earnMinAmt', '0', '$.earnMaxAmt', '43056240') WHERE policy_no = 'T-N-IN'");
+        jdbc.update("UPDATE policy_raw SET raw_json = JSON_SET(raw_json, '$.earnCndSeCd', '0043002', "
+                + "'$.earnMaxAmt', '5000') WHERE policy_no = 'T-N-MULTI'");
+
+        normalizer.normalize();
+
+        long won = jdbc.queryForObject("SELECT earn_max_amt FROM policy WHERE policy_no = 'T-N-IN'", Long.class);
+        long manwon = jdbc.queryForObject("SELECT earn_max_amt FROM policy WHERE policy_no = 'T-N-MULTI'", Long.class);
+        assertEquals(4306L, won, "원 단위 → 만원 (올림)");
+        assertEquals(5000L, manwon, "만원 단위는 그대로");
+    }
+
+    @Test
     void 마감된_정책도_적재한다_마감은_매칭에서_거른다() {
         normalizer.normalize();
 

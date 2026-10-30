@@ -36,6 +36,12 @@ public class PolicyNormalizer {
     /** "20250101 ~ 20251231" 형태의 신청기간에서 날짜 두 개를 꺼낸다. */
     private static final Pattern PERIOD = Pattern.compile("(\\d{8})\\s*~\\s*(\\d{8})");
 
+    /**
+     * D-016: 이 값 이상인 소득 금액은 원 단위로 보고 만원으로 바꾼다.
+     * 만원 단위로 10만(= 10억 원)이 넘는 청년 소득 기준은 없고, 원 단위로 10만 원 이하인 연소득 기준도 없다.
+     */
+    static final long WON_THRESHOLD = 100_000L;
+
     private static final String UPSERT_POLICY = """
             INSERT INTO policy (
                 policy_no, title, category_large, category_medium,
@@ -175,8 +181,8 @@ public class PolicyNormalizer {
                 number(n, "sprtTrgtMaxAge"),
                 text(n, "sprtTrgtAgeLmtYn"),
                 text(n, "earnCndSeCd"),
-                number(n, "earnMinAmt"),
-                number(n, "earnMaxAmt"),
+                toManwon(number(n, "earnMinAmt")),
+                toManwon(number(n, "earnMaxAmt")),
                 text(n, "earnEtcCn"),
                 text(n, "plcyExplnCn"),
                 text(n, "plcySprtCn"),
@@ -273,5 +279,16 @@ public class PolicyNormalizer {
         } catch (NumberFormatException e) {
             return null;
         }
+    }
+
+    /**
+     * D-016: 소득 금액을 만원 단위로 통일한다. 원 단위로 들어온 값(WON_THRESHOLD 이상)만 바꾼다.
+     * 나눌 때는 올린다 — 상한 기준이므로 경계에서 결과를 좁히지 않기 위해서다. 예: 43,056,240원 → 4,306만원.
+     */
+    static Long toManwon(Long amount) {
+        if (amount == null || amount < WON_THRESHOLD) {
+            return amount;
+        }
+        return (amount + 9_999L) / 10_000L;
     }
 }
