@@ -9,6 +9,7 @@ import org.springframework.stereotype.Repository;
  * 9/25 에 손으로 작성·검증한 매칭 SQL 을 그대로 옮긴 것.
  * MySQL 변수(@age, @sido, @income) 자리가 이름 붙은 파라미터(:age, :sido, :income)로 바뀌었을 뿐이다.
  * 값은 문자열로 이어 붙이지 않고 파라미터로 넘기므로 SQL 인젝션이 불가능하다.
+ * p.active = TRUE: 선정 규칙에서 빠진(비활성) 정책은 결과에 내보내지 않는다(D-014).
  */
 @Repository
 public class PolicyMatchRepository {
@@ -27,7 +28,8 @@ public class PolicyMatchRepository {
                      ELSE 'UNKNOWN'
                    END AS income_status
             FROM policy p
-            WHERE ( p.age_limit_yn = 'Y'
+            WHERE p.active = TRUE
+              AND ( p.age_limit_yn = 'Y'
                     OR (p.age_limit_yn = 'N' AND p.min_age <= :age AND :age <= p.max_age) )
               AND ( p.apply_end_date IS NULL OR p.apply_end_date >= CURDATE() )
               AND EXISTS (

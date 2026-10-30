@@ -117,6 +117,18 @@ class PolicyMatchRepositoryTest {
         assertEquals(1, count);
     }
 
+    // ---------- 활성 여부 (D-014) ----------
+
+    @Test
+    void 비활성_정책은_다른_조건이_맞아도_제외한다() {
+        insert("T-INACTIVE", "Y", 0, 0, "0043001", 0L, 0L, null, "99001");
+        assertTrue(titles(25, null).contains("T-INACTIVE"), "활성일 때는 나온다");
+
+        jdbc.update("UPDATE policy SET active = FALSE WHERE policy_no = 'T-INACTIVE'");
+
+        assertFalse(titles(25, null).contains("T-INACTIVE"));
+    }
+
     // ---------- 도우미 ----------
 
     private void insert(String no, String ageLimitYn, int minAge, int maxAge,
