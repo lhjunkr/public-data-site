@@ -29,6 +29,11 @@ import org.springframework.stereotype.Repository;
  * 분류 (D-018) — 열린 탭의 칩(:openChips)을 하나라도 가진 정책만 낸다.
  *  - 닫힌 탭(일자리)의 칩만 가진 정책과 분류가 없는 정책은 결과에 나오지 않는다.
  *  - 결과마다 열린 칩 코드 목록(categories)을 붙인다. 화면은 이것으로 탭·칩별 건수를 센다.
+ *
+ * 취업 상태 (D-021) — 코드 뜻은 온통청년 공식 코드표(jobCd)로 확인했다.
+ *  - :job 이 없으면(null) 거르지 않는다.
+ *  - 있으면 정책 코드에 제한없음(0013010)이나 고른 코드가 하나라도 있는 정책만 낸다.
+ *  - 10/30 측정: 코드가 없는 정책 0건, 제한없음과 다른 코드가 함께 붙은 정책 0건 → 따로 다룰 경우가 없다.
  */
 @Repository
 public class PolicyMatchRepository {
@@ -59,6 +64,10 @@ public class PolicyMatchRepository {
               AND EXISTS (
                     SELECT 1 FROM policy_category pc
                     WHERE pc.policy_id = p.id AND pc.category_code IN (:openChips) )
+              AND ( :job IS NULL
+                    OR EXISTS (
+                        SELECT 1 FROM policy_job pj
+                        WHERE pj.policy_id = p.id AND pj.job_code IN ('0013010', :job) ) )
             ORDER BY p.view_count DESC, p.id
             """;
 
@@ -78,12 +87,13 @@ public class PolicyMatchRepository {
         this.catalog = catalog;
     }
 
-    public List<MatchedPolicy> match(int age, String sido, Long income) {
+    public List<MatchedPolicy> match(int age, String sido, Long income, String job) {
         List<String> openChips = catalog.openChipCodes();
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("age", age)
                 .addValue("sido", sido)
                 .addValue("income", income)    // null 이면 SQL 에서 :income IS NULL 이 참
+                .addValue("job", job)          // null 이면 :job IS NULL 이 참 → 취업 상태로 거르지 않음
                 .addValue("openChips", openChips);
 
         List<MatchedPolicy> policies = jdbc.query(MATCH_SQL, params, (rs, rowNum) -> {

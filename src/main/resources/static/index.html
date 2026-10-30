@@ -153,7 +153,7 @@
 <body>
 
 <h1>청년정책 매칭</h1>
-<p class="subtitle">나이·시도·소득을 입력하면 받을 수 있는 정책을 찾아드립니다.</p>
+<p class="subtitle">나이·시도·취업 상태·소득으로 해당될 수 있는 정책을 찾아 드립니다.</p>
 
 <form id="search-form">
   <div class="field">
@@ -165,6 +165,13 @@
     <select id="sido" required>
       <option value="">시도를 선택하세요</option>
     </select>
+  </div>
+  <div class="field">
+    <label for="job">취업 상태 (선택)</label>
+    <select id="job">
+      <option value="">선택 안 함</option>
+    </select>
+    <span class="hint">선택하지 않으면 취업 상태와 상관없이 조회합니다.</span>
   </div>
   <div class="field">
     <label for="income">연소득 (선택)</label>
@@ -190,6 +197,7 @@
   const ageInput = document.getElementById("age");
   const sidoSelect = document.getElementById("sido");
   const incomeInput = document.getElementById("income");
+  const jobSelect = document.getElementById("job");
   const submitBtn = document.getElementById("submit-btn");
   const errorEl = document.getElementById("error");
   const summaryEl = document.getElementById("summary");
@@ -247,6 +255,27 @@
       }
     } catch (e) {
       showError("서버에 연결할 수 없습니다");
+    }
+  }
+
+  // ---- 취업 상태 목록 로드 (D-021) -------------------------------------------
+  // GET /api/v1/job-statuses → [{code:"0013003", name:"미취업자"}, ...]
+
+  async function loadJobStatuses() {
+    try {
+      const response = await fetch("/api/v1/job-statuses");
+      if (!response.ok) return;   // 목록이 없어도 "선택 안 함"으로 검색은 된다
+      const list = await response.json();
+      if (!Array.isArray(list)) return;
+
+      for (const item of list) {
+        const option = document.createElement("option");
+        option.value = item.code;
+        option.textContent = item.name;
+        jobSelect.appendChild(option);
+      }
+    } catch (e) {
+      // 시도 목록 쪽에서 연결 오류를 이미 알린다
     }
   }
 
@@ -487,6 +516,11 @@
       sido: sidoSelect.value
     };
 
+    // job: "선택 안 함"이면 키 자체를 뺀다 → 취업 상태로 거르지 않음
+    if (jobSelect.value !== "") {
+      body.job = jobSelect.value;
+    }
+
     // income: 입력칸이 비어 있으면 키 자체를 뺀다
     const incomeRaw = incomeInput.value.trim();
     if (incomeRaw !== "") {
@@ -522,6 +556,7 @@
 
   // 초기화
   loadSido();
+  loadJobStatuses();
   loadCategories();
 })();
 </script>

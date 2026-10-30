@@ -162,7 +162,7 @@ class PolicyMatchRepositoryTest {
     @Test
     void 같은_시도의_구가_여러개여도_한번만_나온다() {
         // JOIN 이었다면 2줄, EXISTS 라서 1줄
-        long count = repository.match(25, SIDO, null).stream()
+        long count = repository.match(25, SIDO, null, null).stream()
                 .filter(p -> p.title().equals("T-AGE-19-39"))
                 .count();
         assertEquals(1, count);
@@ -183,12 +183,21 @@ class PolicyMatchRepositoryTest {
     // ---------- 분류 (D-018) ----------
 
     @Test
-    void 닫힌_탭의_칩만_가진_정책은_제외한다() {
-        // 일자리 탭은 취업 상태 조건(D-012) 전까지 닫혀 있다
+    void 열린_칩이_하나도_없는_정책은_제외한다() {
+        // 닫힌 탭(open: false)의 칩이나 묶음표에서 빠진 칩만 가진 경우. 10/30 부터 모든 탭이 열려 있어 가상의 코드로 시험한다
+        insert("T-CLOSED-ONLY", "Y", 0, 0, "0043001", 0L, 0L, null, "99001");
+        setChips("T-CLOSED-ONLY", "closed.example");
+
+        assertFalse(titles(25, null).contains("T-CLOSED-ONLY"));
+    }
+
+    @Test
+    void 일자리_탭이_열려_일자리_칩만_가진_정책도_나온다() {
+        // D-021: 취업 상태 조건과 함께 일자리 탭을 열었다
         insert("T-JOBS-ONLY", "Y", 0, 0, "0043001", 0L, 0L, null, "99001");
         setChips("T-JOBS-ONLY", "jobs.employment");
 
-        assertFalse(titles(25, null).contains("T-JOBS-ONLY"));
+        assertEquals(List.of("jobs.employment"), find("T-JOBS-ONLY", null).categories());
     }
 
     @Test
@@ -202,9 +211,44 @@ class PolicyMatchRepositoryTest {
     @Test
     void 열린_칩과_닫힌_칩을_함께_가지면_나오고_열린_칩만_붙는다() {
         insert("T-MIXED", "Y", 0, 0, "0043001", 0L, 0L, null, "99001");
-        setChips("T-MIXED", "jobs.employment", "education.skills", "housing.rent");
+        setChips("T-MIXED", "closed.example", "education.skills", "housing.rent");
 
         assertEquals(List.of("education.skills", "housing.rent"), find("T-MIXED", null).categories());
+    }
+
+    // ---------- 취업 상태 (D-021) ----------
+
+    @Test
+    void 취업_상태를_고르지_않으면_거르지_않는다() {
+        insertWithJobs("T-JOB-EMPLOYED", "0013001");
+        insertWithJobs("T-JOB-ANY", "0013010");
+
+        Set<String> result = titlesFor(null);
+        assertTrue(result.contains("T-JOB-EMPLOYED"));
+        assertTrue(result.contains("T-JOB-ANY"));
+    }
+
+    @Test
+    void 고른_상태나_제한없음이_붙은_정책만_나온다() {
+        insertWithJobs("T-JOB-UNEMPLOYED", "0013003");
+        insertWithJobs("T-JOB-EMPLOYED", "0013001");
+        insertWithJobs("T-JOB-ANY", "0013010");
+
+        Set<String> result = titlesFor("0013003");   // 미취업자
+        assertTrue(result.contains("T-JOB-UNEMPLOYED"));
+        assertTrue(result.contains("T-JOB-ANY"), "제한없음은 누구에게나 나온다");
+        assertFalse(result.contains("T-JOB-EMPLOYED"), "재직자 전용은 미취업자에게 나오지 않는다");
+    }
+
+    @Test
+    void 여러_상태가_붙은_정책은_그중_하나만_맞아도_한번_나온다() {
+        // 실제 예: K-Art 청년 창작자 지원 = 자영업자 · 프리랜서 · (예비)창업자 · 기타
+        insertWithJobs("T-JOB-MULTI", "0013002", "0013004", "0013006", "0013009");
+
+        assertEquals(1, repository.match(25, SIDO, null, "0013004").stream()
+                .filter(p -> p.title().equals("T-JOB-MULTI")).count(), "프리랜서");
+        assertTrue(titlesFor("0013006").contains("T-JOB-MULTI"), "(예비)창업자");
+        assertFalse(titlesFor("0013001").contains("T-JOB-MULTI"), "재직자");
     }
 
     // ---------- 도우미 ----------
@@ -228,6 +272,15 @@ class PolicyMatchRepositoryTest {
         setChips(no, "housing.rent");
     }
 
+    /** 나이 · 소득 · 마감 조건이 없는 정책을 넣고 취업 상태 코드를 붙인다 */
+    private void insertWithJobs(String no, String... jobCodes) {
+        insert(no, "Y", 0, 0, "0043001", 0L, 0L, null, "99001");
+        Long id = jdbc.queryForObject("SELECT id FROM policy WHERE policy_no = ?", Long.class, no);
+        for (String code : jobCodes) {
+            jdbc.update("INSERT INTO policy_job (policy_id, job_code) VALUES (?, ?)", id, code);
+        }
+    }
+
     /** 정책의 분류(칩)를 주어진 값으로 바꾼다. 아무것도 안 주면 분류 없음 */
     private void setChips(String no, String... chipCodes) {
         Long id = jdbc.queryForObject("SELECT id FROM policy WHERE policy_no = ?", Long.class, no);
@@ -238,13 +291,19 @@ class PolicyMatchRepositoryTest {
     }
 
     private Set<String> titles(int age, Long income) {
-        return repository.match(age, SIDO, income).stream()
+        return repository.match(age, SIDO, income, null).stream()
+                .map(MatchedPolicy::title)
+                .collect(Collectors.toSet());
+    }
+
+    private Set<String> titlesFor(String job) {
+        return repository.match(25, SIDO, null, job).stream()
                 .map(MatchedPolicy::title)
                 .collect(Collectors.toSet());
     }
 
     private MatchedPolicy find(String title, Long income) {
-        List<MatchedPolicy> all = repository.match(25, SIDO, income);
+        List<MatchedPolicy> all = repository.match(25, SIDO, income, null);
         return all.stream().filter(p -> p.title().equals(title)).findFirst()
                 .orElseThrow(() -> new AssertionError(title + " 이(가) 결과에 없음"));
     }

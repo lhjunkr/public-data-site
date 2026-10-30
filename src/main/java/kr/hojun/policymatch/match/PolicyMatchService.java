@@ -1,6 +1,7 @@
 package kr.hojun.policymatch.match;
 
 import java.util.List;
+import kr.hojun.policymatch.job.JobStatus;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -24,7 +25,7 @@ public class PolicyMatchService {
 
     public MatchResponse match(MatchRequest request) {
         validate(request);
-        List<MatchedPolicy> policies = repository.match(request.age(), request.sido(), request.income());
+        List<MatchedPolicy> policies = repository.match(request.age(), request.sido(), request.income(), request.job());
         return new MatchResponse(policies.size(), policies);
     }
 
@@ -43,6 +44,16 @@ public class PolicyMatchService {
         }
         if (request.income() != null && request.income() < 0) {
             throw badRequest("income 은 0 이상이어야 합니다. (만원 단위)");
+        }
+        if (request.job() != null) {
+            if (JobStatus.UNLIMITED_CODE.equals(request.job())) {
+                throw badRequest("job 에 제한없음(" + JobStatus.UNLIMITED_CODE + ")은 쓸 수 없습니다. "
+                        + "취업 상태로 거르지 않으려면 job 을 빼십시오.");
+            }
+            if (JobStatus.ofCode(request.job()).isEmpty()) {
+                throw badRequest("존재하지 않는 취업 상태 코드입니다: " + request.job()
+                        + ". 목록은 GET /api/v1/job-statuses");
+            }
         }
         if (!repository.sidoExists(request.sido())) {
             throw badRequest("존재하지 않는 시도 코드입니다: " + request.sido());

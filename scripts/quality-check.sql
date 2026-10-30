@@ -120,10 +120,24 @@ SELECT
         AND (COALESCE(earn_max_amt, 0) = 0 OR COALESCE(earn_min_amt, 0) > 0))  AS cmp_unknown;
 
 -- [9] 분류 (D-018). uncategorized: 묶음표에 맞는 칩이 없어 결과에 나오지 않는 정책 (새 분류가 생겼다는 신호)
---     visible: 열린 탭의 칩을 하나라도 가진 정책 = 매칭 결과에 나올 수 있는 정책 (닫힌 탭은 jobs 하나라고 가정)
+--     visible: 칩을 하나라도 가진 정책 = 매칭 결과에 나올 수 있는 정책 (D-021 부터 모든 탭이 열려 있다)
 SELECT SUM(IF(NOT EXISTS (SELECT 1 FROM policy_category pc WHERE pc.policy_id = p.id), 1, 0)) AS uncategorized,
-       SUM(IF(EXISTS (SELECT 1 FROM policy_category pc
-                      WHERE pc.policy_id = p.id AND pc.category_code NOT LIKE 'jobs.%'), 1, 0)) AS visible,
+       SUM(IF(EXISTS (SELECT 1 FROM policy_category pc WHERE pc.policy_id = p.id), 1, 0))     AS visible,
        COUNT(*)                                                                            AS active
 FROM policy p
 WHERE p.active = TRUE;
+
+-- [10] 취업 상태 (D-021). 셋 다 0 이어야 매칭 규칙의 전제가 지켜진다.
+--      no_code        : 코드가 없는 정책. 취업 상태를 고르면 결과에서 빠진다
+--      unlimited_mixed: 제한없음(0013010)과 다른 코드가 함께 붙은 정책. 생기면 규칙을 다시 본다
+--      unknown_code   : 공식 코드표(0013001~0013010)에 없는 코드
+SELECT
+    (SELECT COUNT(*) FROM policy p
+      WHERE p.active = TRUE
+        AND NOT EXISTS (SELECT 1 FROM policy_job pj WHERE pj.policy_id = p.id))            AS no_code,
+    (SELECT COUNT(DISTINCT a.policy_id) FROM policy_job a
+       JOIN policy_job b ON b.policy_id = a.policy_id AND b.job_code <> '0013010'
+       JOIN policy p ON p.id = a.policy_id AND p.active = TRUE
+      WHERE a.job_code = '0013010')                                                        AS unlimited_mixed,
+    (SELECT COUNT(*) FROM policy_job pj JOIN policy p ON p.id = pj.policy_id AND p.active = TRUE
+      WHERE pj.job_code NOT BETWEEN '0013001' AND '0013010')                               AS unknown_code;

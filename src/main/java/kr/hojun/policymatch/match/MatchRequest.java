@@ -6,5 +6,6 @@ package kr.hojun.policymatch.match;
  * @param age    나이 (필수)
  * @param sido   시도 코드 2자리, 예: "11" 서울, "12" 전남광주 (필수)
  * @param income 연소득, 만원 단위 (선택. 없으면 금액비교 정책은 판단불가)
+ * @param job    취업 상태 코드, 예: "0013003" 미취업자 (선택. 없으면 취업 상태로 거르지 않음, D-021)
  */
-public record MatchRequest(Integer age, String sido, Long income) {}
+public record MatchRequest(Integer age, String sido, Long income, String job) {}
