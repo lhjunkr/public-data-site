@@ -1,0 +1,96 @@
+-- 데이터 품질 측정 (10/13~). 정규화 직후 서비스 대상(active = TRUE) 정책의 상태를 잰다.
+-- 읽기만 한다(SELECT). 몇 번을 돌려도 DB 는 바뀌지 않는다.
+--
+-- 실행 (맥에서, DB 서버로):
+--   ssh -i ~/.ssh/oracle-db.key ubuntu@168.110.46.199 \
+--     'cd ~/policy && docker compose exec -T mysql mysql --default-character-set=utf8mb4 -t \
+--      -upolicy -p"$(grep ^MYSQL_PASSWORD= .env | cut -d= -f2-)" policy' < scripts/quality-check.sql
+
+-- [0] 원본: 마지막 수집 시각과 그때 확인된 정책 수
+SELECT COUNT(*)                                                     AS raw_rows,
+       MAX(fetched_at)                                              AS last_collected,
+       SUM(fetched_at = (SELECT MAX(fetched_at) FROM policy_raw))   AS seen_in_last_collect
+FROM policy_raw;
+
+-- [1] 건수: 활성(서비스 대상) / 비활성 (D-014)
+SELECT SUM(active)     AS active,
+       SUM(NOT active) AS inactive,
+       COUNT(*)        AS total
+FROM policy;
+
+-- [2] 분류별 활성 건수
+SELECT category_medium, COUNT(*) AS n
+FROM policy
+WHERE active = TRUE
+GROUP BY category_medium
+ORDER BY n DESC;
+
+-- [3] 마감 상태. "상시로 처리됨"은 신청기간 글이 있는데 날짜 두 개를 못 찾은 정책이다
+--     (PolicyNormalizer 의 PERIOD 패턴 불일치). 마감됐어도 결과에 나올 수 있다.
+SELECT CASE
+         WHEN apply_end_date IS NULL AND apply_period_text IS NULL THEN '1 상시 (기간 글 없음)'
+         WHEN apply_end_date IS NULL                              THEN '2 상시로 처리됨 (기간 글 해석 실패)'
+         WHEN apply_end_date >= CURDATE()                         THEN '3 진행중'
+         ELSE                                                          '4 만료'
+       END                                                  AS deadline_state,
+       COUNT(*)                                             AS n,
+       ROUND(COUNT(*) * 100 / SUM(COUNT(*)) OVER (), 1)     AS pct
+FROM policy
+WHERE active = TRUE
+GROUP BY deadline_state
+ORDER BY deadline_state;
+
+-- [3-1] 해석 실패한 신청기간 원문 예시 (최대 10건)
+SELECT policy_no, LEFT(apply_period_text, 60) AS period_text
+FROM policy
+WHERE active = TRUE AND apply_end_date IS NULL AND apply_period_text IS NOT NULL
+ORDER BY policy_no
+LIMIT 10;
+
+-- [4] 나이: 제한 여부 x 0/0 교차표. "'Y' = 나이 제한 없음"(9/25, 30건 기준 추정)이 전체에서도 맞는지 본다.
+--     Y 행의 has_range, N 행의 zero_zero 가 0 이 아니면 추정에 예외가 있다는 뜻이다.
+SELECT age_limit_yn,
+       COUNT(*)                                          AS n,
+       SUM(IF(min_age = 0 AND max_age = 0, 1, 0))       AS zero_zero,
+       SUM(IF(NOT (min_age = 0 AND max_age = 0), 1, 0)) AS has_range,
+       SUM(IF(min_age > max_age, 1, 0))                 AS min_gt_max,
+       SUM(IF(min_age IS NULL OR max_age IS NULL, 1, 0)) AS null_age
+FROM policy
+WHERE active = TRUE
+GROUP BY age_limit_yn
+ORDER BY age_limit_yn;
+
+-- [5] 소득 조건 코드 분포. NULL 과 0043003 은 판단불가가 된다(D-002).
+--     cmp_no_amount: 금액비교(0043002)인데 금액이 둘 다 없음 → 매칭 SQL 에서 누구나 "충족"이 된다.
+--     cmp_max_zero : 금액비교인데 상한이 0 → 소득 0 외에는 전부 "미충족"이 된다.
+SELECT COALESCE(earn_cnd_se_cd, 'NULL')                                       AS earn_cd,
+       COUNT(*)                                                               AS n,
+       ROUND(COUNT(*) * 100 / SUM(COUNT(*)) OVER (), 1)                       AS pct,
+       SUM(IF(earn_cnd_se_cd = '0043002' AND earn_min_amt IS NULL AND earn_max_amt IS NULL, 1, 0)) AS cmp_no_amount,
+       SUM(IF(earn_cnd_se_cd = '0043002' AND earn_max_amt = 0, 1, 0))       AS cmp_max_zero
+FROM policy
+WHERE active = TRUE
+GROUP BY earn_cd
+ORDER BY n DESC;
+
+-- [5-1] 금액비교 정책의 금액 범위. 소득 단위(만원인가 원인가, 미결 #3) 판단 재료
+SELECT COUNT(*)          AS n,
+       MIN(earn_min_amt) AS min_of_min,
+       MAX(earn_min_amt) AS max_of_min,
+       MIN(earn_max_amt) AS min_of_max,
+       MAX(earn_max_amt) AS max_of_max
+FROM policy
+WHERE active = TRUE AND earn_cnd_se_cd = '0043002';
+
+-- [6] 지역 연결이 0건인 정책. 어느 시도를 골라도 결과에 나오지 않는다.
+SELECT COUNT(*) AS no_region
+FROM policy p
+WHERE p.active = TRUE
+  AND NOT EXISTS (SELECT 1 FROM policy_region pr WHERE pr.policy_id = p.id);
+
+-- [7] "확인 필요" 뱃지 비율 (추가 자격 원문 있음, D-003)
+SELECT SUM(extra_qualification IS NOT NULL)                              AS needs_check,
+       COUNT(*)                                                          AS n,
+       ROUND(SUM(extra_qualification IS NOT NULL) * 100 / COUNT(*), 1)   AS pct
+FROM policy
+WHERE active = TRUE;
