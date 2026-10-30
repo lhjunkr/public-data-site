@@ -193,7 +193,41 @@ class PolicyNormalizerTest {
         assertTrue(active("T-N-IN"), "멈췄으므로 기존 활성 정책은 그대로");
     }
 
+    // ---------- 실패 격리 (D-019) ----------
+
+    @Test
+    void 값이_칸보다_긴_정책_하나는_건너뛰고_나머지는_정규화한다() {
+        // 10/30 사고: ref_url 하나가 칸보다 길어 3,763건 전체 정규화가 멈췄다
+        rawWithLongUrl("T-N-LONG");
+
+        NormalizeResult result = normalizer.normalize();
+
+        assertEquals(1, result.failed());
+        assertFalse(exists("T-N-LONG"), "넣지 못한 정책은 남지 않는다");
+        assertTrue(active("T-N-IN"), "나머지는 정상");
+        assertTrue(active("T-N-MULTI"));
+    }
+
+    @Test
+    void 실패가_허용치를_넘으면_전체를_되돌린다() {
+        // 많이 실패하면 개별 데이터가 아니라 구조 문제다(칸 크기, 설정 등)
+        normalizer.normalize();
+        for (int i = 0; i <= PolicyNormalizer.MIN_FAILURE_LIMIT; i++) {
+            rawWithLongUrl("T-N-LONG-" + i);
+        }
+
+        assertThrows(IllegalStateException.class, normalizer::normalize);
+        assertTrue(active("T-N-IN"), "되돌리므로 기존 활성 정책은 그대로");
+    }
+
     // ---------- 도우미 ----------
+
+    /** ref_url 칸(2,048자)보다 긴 참고 링크를 가진 원본 */
+    private void rawWithLongUrl(String no) {
+        raw(no, APPROVED, HOUSING, LATEST, null);
+        jdbc.update("UPDATE policy_raw SET raw_json = JSON_SET(raw_json, '$.refUrlAddr1', ?) WHERE policy_no = ?",
+                "https://example.com/" + "a".repeat(3000), no);
+    }
 
     private void run(String startedAt, String status) {
         jdbc.update("INSERT INTO collect_run (started_at, finished_at, status) VALUES (?, ?, ?)",

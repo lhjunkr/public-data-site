@@ -15,6 +15,7 @@ import java.util.regex.Pattern;
 import kr.hojun.policymatch.category.CategoryCatalog;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -35,6 +36,10 @@ import tools.jackson.databind.ObjectMapper;
  *  - 기준은 마지막으로 "성공한" 수집이다. 실패한 수집은 정상 정책을 비활성하지 못한다.
  *  - 규칙에서 빠진 정책은 지우지 않고 active = FALSE 로 바꾼다. 다시 규칙에 들면 TRUE 로 돌아온다.
  *
+ * 실패 격리 (D-019)
+ *  - 정책 하나의 값이 칸보다 길다는 이유로 3,763건 전체가 멈췄던 일(10/30)이 있었다. 이제 그런 정책은 건너뛰고
+ *    로그와 failed 수로 남긴다. 다만 실패가 많으면(10건 또는 후보의 1% 초과) 구조 문제로 보고 전체를 되돌린다.
+ *
  * 쓰기량 (D-018): 대상이 742건에서 3,763건으로 늘어 매일 도는 배치의 쓰기를 줄였다.
  *  - 지역 코드 마스터(region)는 이미 있는 코드를 처음에 한 번 읽어 두고 새 코드만 넣는다.
  *  - 연결 표는 여러 행을 한 문장(INSERT ... VALUES (..), (..))으로 넣고, 값이 같으면 건너뛴다.
@@ -52,6 +57,9 @@ public class PolicyNormalizer {
      * 만원 단위로 10만(= 10억 원)이 넘는 청년 소득 기준은 없고, 원 단위로 10만 원 이하인 연소득 기준도 없다.
      */
     static final long WON_THRESHOLD = 100_000L;
+
+    /** D-019: 정책 단위 실패를 이만큼(또는 후보의 1%)까지는 건너뛰고, 넘으면 전체를 되돌린다. */
+    static final int MIN_FAILURE_LIMIT = 10;
 
     private static final String UPSERT_POLICY = """
             INSERT INTO policy (
@@ -109,6 +117,7 @@ public class PolicyNormalizer {
         Set<String> unmappedMediums = new TreeSet<>();
         int policies = 0, regionLinks = 0, jobLinks = 0, categoryLinks = 0, uncategorized = 0, skipped = 0;
         List<String> selectedNos = new ArrayList<>();
+        List<String> failedNos = new ArrayList<>();
 
         for (String rawJson : rawRows) {
             JsonNode n = objectMapper.readTree(rawJson);
@@ -118,23 +127,44 @@ public class PolicyNormalizer {
                 continue;
             }
 
-            upsertPolicy(n, policyNo);
-            long policyId = policyIdOf(policyNo);
+            // D-019: 정책 하나가 실패해도 나머지는 계속한다. MySQL 은 실패한 문장 하나만 되돌리고 트랜잭션은 이어 간다.
+            // 실패한 정책은 selectedNos 에 넣지 않으므로 아래 비활성 처리로 결과에서 빠진다.
+            int[] links;
+            Set<String> chips;
+            try {
+                upsertPolicy(n, policyNo);
+                long policyId = policyIdOf(policyNo);
+
+                Set<String> regionCodes = split(text(n, "zipCd"));
+                addNewRegions(regionCodes, knownRegions);
+                String mediums = text(n, "mclsfNm");
+                chips = categories.chipsOf(mediums);
+                unmappedMediums.addAll(categories.unmappedOf(mediums));
+                links = new int[] {
+                        syncLinks("policy_region", "region_code", policyId, regionCodes),
+                        syncLinks("policy_job", "job_code", policyId, split(text(n, "jobCd"))),
+                        syncLinks("policy_category", "category_code", policyId, chips) };
+            } catch (DataAccessException e) {
+                failedNos.add(policyNo);
+                log.warn("정책 {} 정규화 실패 — 건너뜀: {}", policyNo, e.getMostSpecificCause().getMessage());
+                continue;
+            }
+
             policies++;
             selectedNos.add(policyNo);
-
-            Set<String> regionCodes = split(text(n, "zipCd"));
-            addNewRegions(regionCodes, knownRegions);
-            regionLinks += syncLinks("policy_region", "region_code", policyId, regionCodes);
-            jobLinks += syncLinks("policy_job", "job_code", policyId, split(text(n, "jobCd")));
-
-            String mediums = text(n, "mclsfNm");
-            Set<String> chips = categories.chipsOf(mediums);
-            unmappedMediums.addAll(categories.unmappedOf(mediums));
-            categoryLinks += syncLinks("policy_category", "category_code", policyId, chips);
+            regionLinks += links[0];
+            jobLinks += links[1];
+            categoryLinks += links[2];
             if (chips.isEmpty()) {
                 uncategorized++;
             }
+        }
+
+        // 실패가 많으면 개별 데이터 문제가 아니라 구조 문제(칸 크기, 설정, DB 상태)다. 전체를 되돌려 이전 상태를 지킨다.
+        int maxFailures = Math.max(MIN_FAILURE_LIMIT, rawRows.size() / 100);
+        if (failedNos.size() > maxFailures) {
+            throw new IllegalStateException("정규화 실패가 " + failedNos.size() + "건으로 허용치(" + maxFailures
+                    + "건)를 넘어 전체를 되돌립니다. 처음 실패한 정책: " + failedNos.get(0));
         }
 
         // 선정이 0건인데 그대로 진행하면 모든 정책이 비활성이 된다. 성공한 수집이 없거나 데이터가 깨진 상황으로 보고 멈춘다.
@@ -148,11 +178,11 @@ public class PolicyNormalizer {
             // 새 분류가 생겼다는 신호다. 묶음표(application.yml 의 category.tabs)에 넣어야 화면에 나온다.
             log.warn("묶음표에 없는 중분류 {}개: {}", unmappedMediums.size(), unmappedMediums);
         }
-        log.info("정규화 완료 — policy={} region={} job={} category={} uncategorized={} skipped={} deactivated={} ({}ms)",
-                policies, regionLinks, jobLinks, categoryLinks, uncategorized, skipped, deactivated,
+        log.info("정규화 완료 — policy={} region={} job={} category={} uncategorized={} skipped={} failed={} deactivated={} ({}ms)",
+                policies, regionLinks, jobLinks, categoryLinks, uncategorized, skipped, failedNos.size(), deactivated,
                 System.currentTimeMillis() - startedMs);
         return new NormalizeResult(rawRows.size(), policies, regionLinks, jobLinks, categoryLinks,
-                uncategorized, skipped, deactivated);
+                uncategorized, skipped, failedNos.size(), deactivated);
     }
 
     /**
