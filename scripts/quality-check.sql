@@ -22,12 +22,13 @@ SELECT SUM(active)     AS active,
        COUNT(*)        AS total
 FROM policy;
 
--- [2] 분류별 활성 건수
-SELECT category_medium, COUNT(*) AS n
-FROM policy
-WHERE active = TRUE
-GROUP BY category_medium
-ORDER BY n DESC;
+-- [2] 화면 분류(탭.칩)별 활성 정책 수 (D-018). 한 정책이 여러 칩에 속하면 각각 센다. jobs.* 는 닫힌 탭
+SELECT pc.category_code, COUNT(*) AS n
+FROM policy_category pc
+JOIN policy p ON p.id = pc.policy_id
+WHERE p.active = TRUE
+GROUP BY pc.category_code
+ORDER BY pc.category_code;
 
 -- [3] 마감 상태. "상시로 처리됨"은 신청기간 글이 있는데 날짜 두 개를 못 찾은 정책이다
 --     (PolicyNormalizer 의 PERIOD 패턴 불일치). 마감됐어도 결과에 나올 수 있다.
@@ -117,3 +118,12 @@ SELECT
     (SELECT COUNT(*) FROM policy
       WHERE active = TRUE AND earn_cnd_se_cd = '0043002'
         AND (COALESCE(earn_max_amt, 0) = 0 OR COALESCE(earn_min_amt, 0) > 0))  AS cmp_unknown;
+
+-- [9] 분류 (D-018). uncategorized: 묶음표에 맞는 칩이 없어 결과에 나오지 않는 정책 (새 분류가 생겼다는 신호)
+--     visible: 열린 탭의 칩을 하나라도 가진 정책 = 매칭 결과에 나올 수 있는 정책 (닫힌 탭은 jobs 하나라고 가정)
+SELECT SUM(IF(NOT EXISTS (SELECT 1 FROM policy_category pc WHERE pc.policy_id = p.id), 1, 0)) AS uncategorized,
+       SUM(IF(EXISTS (SELECT 1 FROM policy_category pc
+                      WHERE pc.policy_id = p.id AND pc.category_code NOT LIKE 'jobs.%'), 1, 0)) AS visible,
+       COUNT(*)                                                                            AS active
+FROM policy p
+WHERE p.active = TRUE;

@@ -17,7 +17,7 @@ class PolicyMatchServiceTest {
 
     /** 진짜 DB 대신 쓰는 가짜 저장소. 시도 코드는 "11" 하나만 존재한다고 가정한다. */
     static class FakeRepository extends PolicyMatchRepository {
-        FakeRepository() { super(null); }
+        FakeRepository() { super(null, null); }
 
         @Override
         public boolean sidoExists(String sido) { return "11".equals(sido); }

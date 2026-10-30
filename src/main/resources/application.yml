@@ -1,15 +1,72 @@
-# 서비스 대상 범위 설정 (D-011: 카테고리 범위는 설정으로 관리)
-# 건수 상한은 없다. 규칙(승인 + 아래 중분류 + 최근 수집에서 확인)에 맞으면 전부 대상이다(D-014).
-#
-# 대분류가 아니라 중분류로 거른다. 수집한 2,842건을 집계해 보니 대분류가 두 세대로
-# 섞여 있었다 — '복지문화'와 '금융･복지･문화', '참여권리'와 '참여･기반'이 같은 중분류를
-# 나눠 갖고 있다. 대분류로 거르면 어느 쪽을 골라도 절반을 놓친다.
-#
 # 한글 값을 application.properties 가 아니라 이 파일에 둔 이유:
 # .properties 는 인코딩 규약상 한글이 깨질 수 있지만 YAML 은 UTF-8 로 읽는다.
+
+# 서비스 대상 (D-007, D-018): 승인된 정책은 분류와 상관없이 모두 정규화한다. 건수 상한은 없다.
 curation:
-  medium-categories:
-    - 취약계층 및 금융지원
-    - 주택 및 거주지
-    - 전월세 및 주거급여 지원
   approved-status-code: "0044002"
+
+# 화면 분류 묶음표 (D-018, D-011: 설정으로 관리)
+#  - 탭(대분류) → 칩(세부) → 원본 중분류 이름. 원본 중분류 하나는 칩 하나에만 속한다.
+#  - 탭 순서 = 화면 순서. 칩은 탭마다 최대 3개, 100건 미만 덩어리는 가까운 칩에 합친다("기타" 없음).
+#  - 원본 이름 비교는 공백과 가운뎃점(·, ･)을 무시한다. 이름이 바뀐 중분류는 옛 이름도 함께 적는다.
+#  - open: false 인 탭의 칩만 가진 정책은 결과에 나오지 않는다. 일자리는 취업 상태 조건(D-012) 뒤에 연다.
+#  - 근거: docs/quality-check.md 의 "분류 분포" (10/30, 3,763건)
+#  - 묶음을 바꾸면 다음 정규화부터 반영된다.
+category:
+  tabs:
+    - code: housing
+      name: 주거
+      open: true
+      chips:
+        - code: rent
+          name: 전월세
+          mediums: [전월세 및 주거급여 지원]
+        - code: house
+          name: 주택
+          mediums: [주택 및 거주지, 기숙사]
+    - code: welfare
+      name: 금융·복지
+      open: true
+      chips:
+        - code: living
+          name: 금융·생활비
+          mediums: [취약계층 및 금융지원]
+        - code: health
+          name: 건강
+          mediums: [건강]
+        - code: culture
+          name: 문화·예술
+          mediums: [문화활동 및 생활지원, 문화활동, 예술인지원]
+    - code: education
+      name: 교육
+      open: true
+      chips:
+        - code: tuition
+          name: 교육비
+          mediums: [교육비지원]
+        - code: skills
+          name: 역량개발·강의
+          mediums: [미래역량강화, 온·오프라인교육, 온라인교육]
+    - code: participation
+      name: 참여
+      open: true
+      chips:
+        - code: youth
+          name: 청년참여
+          mediums: [청년참여, 정책인프라구축]
+        - code: exchange
+          name: 국제교류
+          mediums: [청년국제교류]
+    - code: jobs
+      name: 일자리
+      open: false
+      chips:
+        - code: employment
+          name: 취업
+          mediums: [취업]
+        - code: startup
+          name: 창업
+          mediums: [창업]
+        - code: worker
+          name: 재직자·권익
+          mediums: [재직자, 권익보호]

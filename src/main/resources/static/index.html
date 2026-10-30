@@ -59,6 +59,42 @@
   }
   #summary { font-size: 16px; font-weight: 700; margin: 26px 2px 12px; }
 
+  /* 분류 탭 · 칩 (D-018). 전역 button 스타일(파란 꽉 찬 버튼)을 덮어쓴다 */
+  .filter-row {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding: 2px 2px 6px;
+    margin-bottom: 8px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .filter-row:empty { display: none; }
+  .filter-row button {
+    width: auto;
+    flex: 0 0 auto;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .tab {
+    padding: 8px 14px;
+    font-size: 14px;
+    font-weight: 600;
+    border: 1px solid #ccd6e4;
+    border-radius: 18px;
+    background: #fff;
+    color: #333;
+  }
+  .tab.active { background: #1a5fb4; border-color: #1a5fb4; color: #fff; }
+  .chip {
+    padding: 5px 12px;
+    font-size: 13px;
+    border: 1px solid #e2e2e2;
+    border-radius: 14px;
+    background: #f3f5f8;
+    color: #444;
+  }
+  .chip.active { background: #e2ecf8; border-color: #1a5fb4; color: #1a5fb4; font-weight: 600; }
+
   #results { list-style: none; padding: 0; margin: 0; display: grid; gap: 14px; }
   .card {
     background: #fff;
@@ -142,6 +178,8 @@
 
 <p id="error"></p>
 <p id="summary"></p>
+<div id="tabs" class="filter-row" role="group" aria-label="분야"></div>
+<div id="chips" class="filter-row" role="group" aria-label="세부 분야"></div>
 <ul id="results"></ul>
 
 <script>
@@ -156,6 +194,8 @@
   const errorEl = document.getElementById("error");
   const summaryEl = document.getElementById("summary");
   const resultsEl = document.getElementById("results");
+  const tabsEl = document.getElementById("tabs");
+  const chipsEl = document.getElementById("chips");
 
   // ---- 유틸 ----------------------------------------------------------------
 
@@ -210,6 +250,113 @@
     }
   }
 
+  // ---- 분류 탭 · 칩 (D-018) ---------------------------------------------------
+  // GET /api/v1/categories → [{code:"housing", name:"주거", chips:[{code:"housing.rent", name:"전월세"}]}]
+  // 매칭 결과의 policy.categories 에는 칩 코드("housing.rent")가 들어 있다.
+
+  let catalog = [];          // 열린 탭 목록 (화면 순서)
+  const chipInfo = {};       // 칩 코드 → { tab, chip }
+  let currentPolicies = [];  // 마지막 검색 결과 전체
+  let activeTab = "all";     // "all" 또는 탭 코드
+  let activeChip = "all";    // "all" 또는 칩 코드
+
+  async function loadCategories() {
+    try {
+      const response = await fetch("/api/v1/categories");
+      if (!response.ok) return;
+      const list = await response.json();
+      if (!Array.isArray(list)) return;
+      catalog = list;
+      for (const tab of list) {
+        for (const chip of (tab.chips || [])) {
+          chipInfo[chip.code] = { tab: tab, chip: chip };
+        }
+      }
+    } catch (e) {
+      // 분류를 못 불러와도 결과 목록은 보여준다 (탭만 안 보임)
+    }
+  }
+
+  function chipsOf(policy) {
+    return Array.isArray(policy.categories) ? policy.categories : [];
+  }
+
+  function inTab(policy, tabCode) {
+    return chipsOf(policy).some(function (code) {
+      return chipInfo[code] && chipInfo[code].tab.code === tabCode;
+    });
+  }
+
+  function isVisible(policy) {
+    if (activeTab === "all") return true;
+    if (activeChip === "all") return inTab(policy, activeTab);
+    return chipsOf(policy).includes(activeChip);
+  }
+
+  function filterButton(cls, label, count, active, onClick) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = cls + (active ? " active" : "");
+    b.setAttribute("aria-pressed", active ? "true" : "false");
+    b.textContent = label + " " + count;
+    b.addEventListener("click", onClick);
+    return b;
+  }
+
+  // 탭과 칩에는 건수를 붙이고, 0건인 것은 아예 그리지 않는다
+  function renderFilters() {
+    tabsEl.textContent = "";
+    chipsEl.textContent = "";
+    if (currentPolicies.length === 0 || catalog.length === 0) return;
+
+    tabsEl.appendChild(filterButton("tab", "전체", currentPolicies.length, activeTab === "all",
+      function () { activeTab = "all"; activeChip = "all"; renderPage(); }));
+    for (const tab of catalog) {
+      const n = currentPolicies.filter(function (p) { return inTab(p, tab.code); }).length;
+      if (n === 0) continue;
+      tabsEl.appendChild(filterButton("tab", tab.name, n, activeTab === tab.code,
+        function () { activeTab = tab.code; activeChip = "all"; renderPage(); }));
+    }
+
+    if (activeTab === "all") return;
+    const tab = catalog.find(function (t) { return t.code === activeTab; });
+    if (!tab) return;
+    const tabPolicies = currentPolicies.filter(function (p) { return inTab(p, tab.code); });
+    chipsEl.appendChild(filterButton("chip", "전체", tabPolicies.length, activeChip === "all",
+      function () { activeChip = "all"; renderPage(); }));
+    for (const chip of (tab.chips || [])) {
+      const n = tabPolicies.filter(function (p) { return chipsOf(p).includes(chip.code); }).length;
+      if (n === 0) continue;
+      chipsEl.appendChild(filterButton("chip", chip.name, n, activeChip === chip.code,
+        function () { activeChip = chip.code; renderPage(); }));
+    }
+  }
+
+  function renderList() {
+    resultsEl.textContent = "";
+    for (const policy of currentPolicies) {
+      if (isVisible(policy)) resultsEl.appendChild(createCard(policy));
+    }
+  }
+
+  function renderPage() {
+    renderFilters();
+    renderList();
+  }
+
+  // 카드에 보일 분류: "주거 · 전월세" (묶음표 이름). 분류 정보가 없으면 원본 대분류 > 중분류
+  function categoryLabel(policy) {
+    const names = [];
+    for (const code of chipsOf(policy)) {
+      const info = chipInfo[code];
+      if (info) names.push(info.tab.name + " · " + info.chip.name);
+    }
+    if (names.length > 0) return names.join(", ");
+    const large = policy.categoryLarge != null ? policy.categoryLarge : "";
+    const medium = policy.categoryMedium != null ? policy.categoryMedium : "";
+    return medium ? (large + " > " + medium) : large;
+  }
+
   // ---- 소득 뱃지 -----------------------------------------------------------
 
   const BADGE = {
@@ -230,12 +377,10 @@
     title.textContent = policy.title != null ? policy.title : "";
     li.appendChild(title);
 
-    // 카테고리: "대분류 > 중분류"
+    // 분류: "주거 · 전월세"
     const category = document.createElement("div");
     category.className = "category";
-    const large = policy.categoryLarge != null ? policy.categoryLarge : "";
-    const medium = policy.categoryMedium != null ? policy.categoryMedium : "";
-    category.textContent = medium ? (large + " > " + medium) : large;
+    category.textContent = categoryLabel(policy);
     li.appendChild(category);
 
     // 소득 뱃지 + (UNKNOWN일 때) 설명
@@ -313,19 +458,18 @@
   // ---- 결과 렌더링 ---------------------------------------------------------
 
   function renderResults(data) {
-    resultsEl.textContent = "";
-    const count = typeof data.count === "number" ? data.count : 0;
+    currentPolicies = Array.isArray(data.policies) ? data.policies : [];
+    activeTab = "all";
+    activeChip = "all";
 
-    if (count === 0) {
+    if (currentPolicies.length === 0) {
       summaryEl.textContent = "조건에 맞는 정책이 없습니다";
+      renderPage();
       return;
     }
 
-    summaryEl.textContent = "총 " + count + "건";
-    const policies = Array.isArray(data.policies) ? data.policies : [];
-    for (const policy of policies) {
-      resultsEl.appendChild(createCard(policy));
-    }
+    summaryEl.textContent = "총 " + currentPolicies.length + "건";
+    renderPage();
   }
 
   // ---- 폼 제출 (매칭 API) --------------------------------------------------
@@ -334,7 +478,8 @@
     event.preventDefault();
     clearError();
     summaryEl.textContent = "";
-    resultsEl.textContent = "";
+    currentPolicies = [];
+    renderPage();
 
     // 요청 바디 구성
     const body = {
@@ -377,6 +522,7 @@
 
   // 초기화
   loadSido();
+  loadCategories();
 })();
 </script>
 

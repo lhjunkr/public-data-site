@@ -180,6 +180,33 @@ class PolicyMatchRepositoryTest {
         assertFalse(titles(25, null).contains("T-INACTIVE"));
     }
 
+    // ---------- 분류 (D-018) ----------
+
+    @Test
+    void 닫힌_탭의_칩만_가진_정책은_제외한다() {
+        // 일자리 탭은 취업 상태 조건(D-012) 전까지 닫혀 있다
+        insert("T-JOBS-ONLY", "Y", 0, 0, "0043001", 0L, 0L, null, "99001");
+        setChips("T-JOBS-ONLY", "jobs.employment");
+
+        assertFalse(titles(25, null).contains("T-JOBS-ONLY"));
+    }
+
+    @Test
+    void 분류가_없는_정책은_제외한다() {
+        insert("T-NO-CHIP", "Y", 0, 0, "0043001", 0L, 0L, null, "99001");
+        setChips("T-NO-CHIP");
+
+        assertFalse(titles(25, null).contains("T-NO-CHIP"));
+    }
+
+    @Test
+    void 열린_칩과_닫힌_칩을_함께_가지면_나오고_열린_칩만_붙는다() {
+        insert("T-MIXED", "Y", 0, 0, "0043001", 0L, 0L, null, "99001");
+        setChips("T-MIXED", "jobs.employment", "education.skills", "housing.rent");
+
+        assertEquals(List.of("education.skills", "housing.rent"), find("T-MIXED", null).categories());
+    }
+
     // ---------- 도우미 ----------
 
     private void insert(String no, String ageLimitYn, Integer minAge, Integer maxAge,
@@ -196,6 +223,17 @@ class PolicyMatchRepositoryTest {
         Long id = jdbc.queryForObject("SELECT id FROM policy WHERE policy_no = ?", Long.class, no);
         for (String code : regionCodes) {
             jdbc.update("INSERT INTO policy_region (policy_id, region_code) VALUES (?, ?)", id, code);
+        }
+        // D-018: 결과에 나오려면 열린 탭의 칩이 하나는 있어야 한다. 기본은 주거 > 전월세
+        setChips(no, "housing.rent");
+    }
+
+    /** 정책의 분류(칩)를 주어진 값으로 바꾼다. 아무것도 안 주면 분류 없음 */
+    private void setChips(String no, String... chipCodes) {
+        Long id = jdbc.queryForObject("SELECT id FROM policy WHERE policy_no = ?", Long.class, no);
+        jdbc.update("DELETE FROM policy_category WHERE policy_id = ?", id);
+        for (String chip : chipCodes) {
+            jdbc.update("INSERT INTO policy_category (policy_id, category_code) VALUES (?, ?)", id, chip);
         }
     }
 
