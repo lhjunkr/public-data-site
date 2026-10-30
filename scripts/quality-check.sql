@@ -94,3 +94,22 @@ SELECT SUM(extra_qualification IS NOT NULL)                              AS need
        ROUND(SUM(extra_qualification IS NOT NULL) * 100 / COUNT(*), 1)   AS pct
 FROM policy
 WHERE active = TRUE;
+
+-- [8] 품질 기준 (10/14, D-015 · D-016). age_never_match 와 amount_in_won 이 0 이어야 통과한다.
+--     age_never_match: 매칭 SQL(PolicyMatchRepository)의 나이 규칙으로 0~120세 어느 나이에도 걸리지 않는 정책
+--     amount_in_won  : 만원으로 바뀌지 않고 원 단위(10만 이상)로 남은 금액
+--     cmp_unknown    : 금액비교 정책 중 상한이 없거나 하한이 있어 판단불가가 될 수 있는 정책 (참고용)
+WITH RECURSIVE ages (a) AS (SELECT 0 UNION ALL SELECT a + 1 FROM ages WHERE a < 120)
+SELECT
+    (SELECT COUNT(*) FROM policy p
+      WHERE p.active = TRUE
+        AND NOT EXISTS (
+            SELECT 1 FROM ages
+            WHERE ( (p.min_age IS NULL OR p.min_age = 0 OR p.min_age <= a)
+                    AND (p.max_age IS NULL OR p.max_age = 0 OR a <= p.max_age) )
+               OR (p.max_age > 0 AND p.min_age > p.max_age)))                    AS age_never_match,
+    (SELECT COUNT(*) FROM policy
+      WHERE active = TRUE AND (earn_min_amt >= 100000 OR earn_max_amt >= 100000)) AS amount_in_won,
+    (SELECT COUNT(*) FROM policy
+      WHERE active = TRUE AND earn_cnd_se_cd = '0043002'
+        AND (COALESCE(earn_max_amt, 0) = 0 OR COALESCE(earn_min_amt, 0) > 0))  AS cmp_unknown;

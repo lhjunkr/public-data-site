@@ -46,6 +46,14 @@ class PolicyMatchRepositoryTest {
         insert("T-INCOME-ETC",   "Y", 0,  0,  "0043003", 0L,   0L,    null,  "99001");
         insert("T-INCOME-NULL",  "Y", 0,  0,  null,      null, null,  null,  "99001");
         insert("T-OTHER-SIDO",   "Y", 0,  0,  "0043001", 0L,   0L,    null,  "98001");
+        // D-015 · D-016 (10/30 전체 데이터 측정에서 나온 경우들)
+        insert("T-N-ZERO",       "N", 0,  0,  "0043001", 0L,   0L,    null,  "99001");
+        insert("T-Y-19-34",      "Y", 19, 34, "0043001", 0L,   0L,    null,  "99001");
+        insert("T-18-UP",        "N", 18, 0,  "0043001", 0L,   0L,    null,  "99001");
+        insert("T-AGE-NULL",     "Y", null, null, "0043001", 0L, 0L,  null,  "99001");
+        insert("T-AGE-FLIP",     "N", 39, 19, "0043001", 0L,   0L,    null,  "99001");
+        insert("T-INCOME-NOAMT", "Y", 0,  0,  "0043002", 0L,   0L,    null,  "99001");
+        insert("T-INCOME-MIN",   "Y", 0,  0,  "0043002", 4000L, 6000L, null, "99001");
     }
 
     // ---------- 나이 ----------
@@ -59,10 +67,38 @@ class PolicyMatchRepositoryTest {
     }
 
     @Test
-    void 나이제한_없음_Y는_어떤_나이든_포함한다() {
-        // 0/0 을 그대로 비교했다면 모든 나이에서 빠졌을 정책
-        assertTrue(titles(0, null).contains("T-NO-AGE-LIMIT"));
-        assertTrue(titles(120, null).contains("T-NO-AGE-LIMIT"));
+    void 나이_0_0은_표시값과_상관없이_어떤_나이든_포함한다() {
+        // 9/25 규칙은 Y 만 나이 무관으로 봤다. N + 0/0 은 0세가 아니면 절대 나오지 않았다(10/30 측정 16건)
+        for (int age : new int[] {0, 25, 120}) {
+            Set<String> result = titles(age, null);
+            assertTrue(result.contains("T-NO-AGE-LIMIT"), "Y 0/0, " + age + "세");
+            assertTrue(result.contains("T-N-ZERO"), "N 0/0, " + age + "세");
+        }
+    }
+
+    @Test
+    void Y여도_나이_범위가_있으면_범위로_비교한다() {
+        // 10/30 측정: Y 306건 중 156건이 범위를 가졌고, 원문에도 같은 나이가 적혀 있었다
+        assertFalse(titles(18, null).contains("T-Y-19-34"));
+        assertTrue(titles(19, null).contains("T-Y-19-34"));
+        assertTrue(titles(34, null).contains("T-Y-19-34"));
+        assertFalse(titles(35, null).contains("T-Y-19-34"));
+    }
+
+    @Test
+    void 최대_0은_상한_없음이다() {
+        // 원문 예: "만 18세가 되어 보호가 종료된 아동" → 18세 이상
+        assertFalse(titles(17, null).contains("T-18-UP"));
+        assertTrue(titles(18, null).contains("T-18-UP"));
+        assertTrue(titles(120, null).contains("T-18-UP"));
+    }
+
+    @Test
+    void 나이를_판단할_수_없으면_포함한다() {
+        // 값이 없거나 최소 > 최대로 뒤집힌 경우 — 빼면 받을 수 있는 정책을 놓친다(D-001)
+        Set<String> result = titles(25, null);
+        assertTrue(result.contains("T-AGE-NULL"));
+        assertTrue(result.contains("T-AGE-FLIP"));
     }
 
     // ---------- 마감 ----------
@@ -94,6 +130,21 @@ class PolicyMatchRepositoryTest {
         assertEquals(IncomeStatus.MET,     statusOf("T-NO-AGE-LIMIT", 3000L));  // 0043001 무관
         assertEquals(IncomeStatus.UNKNOWN, statusOf("T-INCOME-ETC", 3000L));    // 0043003 기타
         assertEquals(IncomeStatus.UNKNOWN, statusOf("T-INCOME-NULL", 3000L));   // 코드 없음
+    }
+
+    @Test
+    void 금액비교인데_상한이_없으면_판단불가() {
+        // 10/30 측정: 상한 0 인 정책이 예전에는 모두에게 "미충족"이었다
+        assertEquals(IncomeStatus.UNKNOWN, statusOf("T-INCOME-NOAMT", 0L));
+        assertEquals(IncomeStatus.UNKNOWN, statusOf("T-INCOME-NOAMT", 3000L));
+    }
+
+    @Test
+    void 금액비교에_하한이_있으면_상한_이하는_판단불가_넘으면_미충족() {
+        // 하한 칸에 다른 대상의 기준이 들어간 사례(청년 4,000 / 신혼부부 6,000) — 상한 이하는 판단할 수 없다
+        assertEquals(IncomeStatus.UNKNOWN, statusOf("T-INCOME-MIN", 3000L));
+        assertEquals(IncomeStatus.UNKNOWN, statusOf("T-INCOME-MIN", 6000L));
+        assertEquals(IncomeStatus.NOT_MET, statusOf("T-INCOME-MIN", 6001L));
     }
 
     @Test
@@ -131,7 +182,7 @@ class PolicyMatchRepositoryTest {
 
     // ---------- 도우미 ----------
 
-    private void insert(String no, String ageLimitYn, int minAge, int maxAge,
+    private void insert(String no, String ageLimitYn, Integer minAge, Integer maxAge,
                         String earnCd, Long earnMin, Long earnMax, Integer endOffsetDays,
                         String... regionCodes) {
         jdbc.update("""
