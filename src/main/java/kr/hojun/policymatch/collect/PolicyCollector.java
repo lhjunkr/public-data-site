@@ -1,6 +1,7 @@
 package kr.hojun.policymatch.collect;
 
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import org.slf4j.Logger;
@@ -16,6 +17,8 @@ import tools.jackson.databind.JsonNode;
  *    API 응답 형태가 바뀌거나 정규화 규칙이 틀려도 원본이 남아 있으면 다시 만들 수 있다.
  *  - totCount 는 신뢰하되 맹신하지 않는다. 수집 도중 정책이 추가·삭제되면 값이 흔들리므로
  *    (docs/decisions.md 의 미해결 이슈 O-4), 빈 페이지를 만나면 그 자리에서 멈춘다.
+ *  - 실행마다 collect_run 에 결과를 남긴다(D-017). 끝까지 읽고 totCount 의 95% 이상을 받아야 성공이다.
+ *    정규화는 마지막으로 성공한 수집을 기준으로 정책을 고르므로, 실패한 수집이 정상 정책을 지우지 못한다.
  */
 @Service
 public class PolicyCollector {
@@ -24,44 +27,67 @@ public class PolicyCollector {
     private static final int MAX_PAGES = 200;      // 폭주 방지 상한
     private static final long PAGE_DELAY_MS = 200; // 상대 서버 배려
 
+    /** 성공으로 볼 최소 비율. 수집 도중 정책이 몇 건 삭제되는 정도(O-4)는 허용한다. */
+    static final double MIN_COMPLETE_RATIO = 0.95;
+
     private final YouthApiClient client;
     private final PolicyRawStore store;
+    private final CollectRunStore runs;
     private final YouthApiProperties props;
 
-    public PolicyCollector(YouthApiClient client, PolicyRawStore store, YouthApiProperties props) {
+    public PolicyCollector(YouthApiClient client, PolicyRawStore store, CollectRunStore runs,
+                           YouthApiProperties props) {
         this.client = client;
         this.store = store;
+        this.runs = runs;
         this.props = props;
     }
 
     public CollectResult collectAll() {
-        LocalDateTime startedAt = LocalDateTime.now();
+        // 초 단위로 자른다. collect_run.started_at 과 policy_raw.fetched_at 이 정확히 같은 값이어야 비교가 맞는다.
+        LocalDateTime startedAt = LocalDateTime.now().truncatedTo(ChronoUnit.SECONDS);
+        long runId = runs.start(startedAt);
 
-        JsonNode first = client.fetchPage(1);
-        int totCount = JsonNodes.intValue(first.path("result").path("pagging").path("totCount"), 0);
-        int pageSize = Math.max(1, props.getPageSize());
-        int totalPages = Math.min(MAX_PAGES, (totCount + pageSize - 1) / pageSize);
+        int totCount = 0;
+        int itemsSeen = 0;
+        int pagesRead = 0;
+        try {
+            JsonNode first = client.fetchPage(1);
+            totCount = JsonNodes.intValue(first.path("result").path("pagging").path("totCount"), 0);
+            int pageSize = Math.max(1, props.getPageSize());
+            int totalPages = Math.min(MAX_PAGES, (totCount + pageSize - 1) / pageSize);
 
-        log.info("수집 시작 — totCount={} pageSize={} totalPages={}", totCount, pageSize, totalPages);
+            log.info("수집 시작 — run={} totCount={} pageSize={} totalPages={}", runId, totCount, pageSize, totalPages);
 
-        int itemsSeen = savePage(first, startedAt);
-        int pagesRead = 1;
+            itemsSeen = savePage(first, startedAt);
+            pagesRead = 1;
 
-        for (int page = 2; page <= totalPages; page++) {
-            JsonNode node = client.fetchPage(page);
-            int saved = savePage(node, startedAt);
-            pagesRead++;
-            itemsSeen += saved;
+            for (int page = 2; page <= totalPages; page++) {
+                JsonNode node = client.fetchPage(page);
+                int saved = savePage(node, startedAt);
+                pagesRead++;
+                itemsSeen += saved;
 
-            if (saved == 0) {
-                log.warn("page={} 가 비어 있어 수집을 조기 종료합니다.", page);
-                break;
+                if (saved == 0) {
+                    log.warn("page={} 가 비어 있어 수집을 조기 종료합니다.", page);
+                    break;
+                }
+                sleepQuietly();
             }
-            sleepQuietly();
+        } catch (RuntimeException e) {
+            runs.finish(runId, CollectRunStore.FAILED, totCount, itemsSeen, e.getMessage());
+            throw e;
         }
 
+        if (totCount == 0 || itemsSeen < totCount * MIN_COMPLETE_RATIO) {
+            String msg = "수집이 끝까지 되지 않았습니다 — totCount=" + totCount + ", itemsSeen=" + itemsSeen;
+            runs.finish(runId, CollectRunStore.FAILED, totCount, itemsSeen, msg);
+            throw new YouthApiException(msg);
+        }
+        runs.finish(runId, CollectRunStore.SUCCESS, totCount, itemsSeen, null);
+
         long rows = store.count();
-        log.info("수집 완료 — pagesRead={} itemsSeen={} policy_raw rows={}", pagesRead, itemsSeen, rows);
+        log.info("수집 완료 — run={} pagesRead={} itemsSeen={} policy_raw rows={}", runId, pagesRead, itemsSeen, rows);
         return new CollectResult(totCount, pagesRead, itemsSeen, rows);
     }
 

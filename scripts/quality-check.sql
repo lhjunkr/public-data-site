@@ -6,10 +6,14 @@
 --     'cd ~/policy && docker compose exec -T mysql mysql --default-character-set=utf8mb4 -t \
 --      -upolicy -p"$(grep ^MYSQL_PASSWORD= .env | cut -d= -f2-)" policy' < scripts/quality-check.sql
 
--- [0] 원본: 마지막 수집 시각과 그때 확인된 정책 수
-SELECT COUNT(*)                                                     AS raw_rows,
-       MAX(fetched_at)                                              AS last_collected,
-       SUM(fetched_at = (SELECT MAX(fetched_at) FROM policy_raw))   AS seen_in_last_collect
+-- [0] 수집 기록 최근 3회 (D-017)와, 마지막 성공 수집 이후 확인된 원본 수 (= 정규화 선정 후보의 모집단)
+SELECT id, started_at, status, tot_count, items_seen, LEFT(message, 60) AS message
+FROM collect_run
+ORDER BY id DESC
+LIMIT 3;
+
+SELECT COUNT(*)                                                                                  AS raw_rows,
+       SUM(IF(fetched_at >= (SELECT MAX(started_at) FROM collect_run WHERE status = 'SUCCESS'), 1, 0)) AS seen_since_last_success
 FROM policy_raw;
 
 -- [1] 건수: 활성(서비스 대상) / 비활성 (D-014)

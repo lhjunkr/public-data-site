@@ -18,15 +18,17 @@ import org.springframework.transaction.annotation.Transactional;
  * D-014 선정 규칙 테스트. 시험용 원본을 policy_raw 에 넣고 정규화를 실제로 돌린다.
  *
  * - @Transactional: 테스트가 끝나면 전부 롤백된다. 로컬 DB 의 실제 데이터는 바뀌지 않는다.
- * - 수집 시각은 2099년으로 넣는다. 실제 데이터보다 항상 뒤이므로 LATEST 가 "가장 최근 수집"이 되고,
+ * - 수집 시각은 2099년으로 넣는다. 실제 데이터보다 항상 뒤이므로 LATEST 가 "마지막 성공 수집"이 되고,
  *   실제 원본은 선정 대상에서 빠진다(그래서 로컬 DB 에 데이터가 있어도 결과가 흔들리지 않는다).
+ * - 선정 기준은 collect_run 의 마지막 SUCCESS 다(D-017). setUp 에서 LATEST 에 성공한 수집 기록을 넣는다.
  */
 @SpringBootTest
 @Transactional
 class PolicyNormalizerTest {
 
-    private static final String LATEST = "2099-01-02 00:00:00";   // 가장 최근 수집
-    private static final String OLDER = "2099-01-01 00:00:00";    // 그 전 수집 = 이번 수집에서 안 보인 정책
+    private static final String LATEST = "2099-01-02 00:00:00";   // 마지막 성공 수집
+    private static final String OLDER = "2099-01-01 00:00:00";    // 그 전 수집 = 이후로 안 보인 정책
+    private static final String FAILED_AT = "2099-01-03 00:00:00"; // 성공 수집 뒤의 실패한 수집
     private static final String APPROVED = "0044002";
     private static final String NOT_APPROVED = "0044001";         // 승인(0044002)이 아닌 코드
     private static final String HOUSING = "주택 및 거주지";
@@ -43,6 +45,7 @@ class PolicyNormalizerTest {
         raw("T-N-UNAPPROVED",  NOT_APPROVED, HOUSING,                         LATEST,   null);
         raw("T-N-OTHER-CAT",   APPROVED,     "취업",                           LATEST,   null);
         raw("T-N-GONE",        APPROVED,     HOUSING,                         OLDER,    null);
+        run(LATEST, "SUCCESS");
     }
 
     // ---------- 선정 ----------
@@ -140,7 +143,39 @@ class PolicyNormalizerTest {
         assertTrue(active("T-N-IN"), "멈췄으므로 기존 활성 정책은 그대로");
     }
 
+    // ---------- 수집 기록 기준 (D-017) ----------
+
+    @Test
+    void 실패한_수집이_있어도_마지막_성공_수집_기준으로_고른다() {
+        // 10/30 사고 재현: 성공 수집 뒤에 앞부분만 갱신하고 실패한 수집이 있다.
+        // 예전 기준(가장 최근 fetched_at)이었다면 T-N-IN 만 선정되고 나머지는 모두 비활성됐다.
+        normalizer.normalize();
+        run(FAILED_AT, "FAILED");
+        jdbc.update("UPDATE policy_raw SET fetched_at = ? WHERE policy_no = 'T-N-IN'", FAILED_AT);
+
+        NormalizeResult result = normalizer.normalize();
+
+        assertTrue(active("T-N-IN"), "실패한 수집에서 본 정책도 존재가 확인된 것");
+        assertTrue(active("T-N-MULTI"), "실패한 수집에서 못 봤어도 성공 수집에서 본 정책");
+        assertTrue(active("T-N-EXPIRED"));
+        assertEquals(0, result.deactivated());
+    }
+
+    @Test
+    void 성공한_수집이_없으면_정규화하지_않는다() {
+        normalizer.normalize();
+        jdbc.update("DELETE FROM collect_run");
+
+        assertThrows(IllegalStateException.class, normalizer::normalize);
+        assertTrue(active("T-N-IN"), "멈췄으므로 기존 활성 정책은 그대로");
+    }
+
     // ---------- 도우미 ----------
+
+    private void run(String startedAt, String status) {
+        jdbc.update("INSERT INTO collect_run (started_at, finished_at, status) VALUES (?, ?, ?)",
+                startedAt, startedAt, status);
+    }
 
     private void raw(String no, String status, String mediumCategory, String fetchedAt, String period) {
         String json = """
