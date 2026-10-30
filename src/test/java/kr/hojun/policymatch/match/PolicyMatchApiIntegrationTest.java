@@ -42,6 +42,10 @@ class PolicyMatchApiIntegrationTest {
                 INSERT INTO policy_region (policy_id, region_code)
                 SELECT id, '99001' FROM policy WHERE policy_no = 'T-API'
                 """);
+        jdbc.update("""
+                INSERT INTO policy_category (policy_id, category_code)
+                SELECT id, 'housing.rent' FROM policy WHERE policy_no = 'T-API'
+                """);
     }
 
     @Test
@@ -52,7 +56,8 @@ class PolicyMatchApiIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.count").value(1))
                 .andExpect(jsonPath("$.policies[0].title").value("T-API"))
-                .andExpect(jsonPath("$.policies[0].incomeStatus").value("NOT_MET"));
+                .andExpect(jsonPath("$.policies[0].incomeStatus").value("NOT_MET"))
+                .andExpect(jsonPath("$.policies[0].categories[0]").value("housing.rent"));
     }
 
     @Test

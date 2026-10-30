@@ -51,14 +51,37 @@ class PolicyNormalizerTest {
     // ---------- 선정 ----------
 
     @Test
-    void 규칙에_맞는_정책만_적재하고_활성으로_둔다() {
+    void 승인된_정책은_분류와_상관없이_적재하고_활성으로_둔다() {
+        // D-018: 예전(D-014)에는 중분류 3개만 적재했다. 이제 분류는 화면에서 묶음표로 나눈다
         normalizer.normalize();
 
         assertTrue(active("T-N-IN"));
-        assertTrue(active("T-N-MULTI"), "중분류가 콤마 다중값이어도 대상 분류가 있으면 선정");
+        assertTrue(active("T-N-MULTI"));
+        assertTrue(active("T-N-OTHER-CAT"), "취업처럼 닫힌 탭의 분류여도 적재한다");
         assertFalse(exists("T-N-UNAPPROVED"), "승인되지 않은 정책은 적재하지 않는다");
-        assertFalse(exists("T-N-OTHER-CAT"), "대상 분류가 아닌 정책은 적재하지 않는다");
-        assertFalse(exists("T-N-GONE"), "가장 최근 수집에 없던 정책은 적재하지 않는다");
+        assertFalse(exists("T-N-GONE"), "마지막 성공 수집 이후로 안 보인 정책은 적재하지 않는다");
+    }
+
+    // ---------- 분류 (D-018) ----------
+
+    @Test
+    void 중분류를_묶음표의_칩으로_연결한다() {
+        normalizer.normalize();
+
+        assertEquals(List.of("housing.house"), chips("T-N-IN"));
+        assertEquals(List.of("housing.rent", "jobs.employment"), chips("T-N-MULTI"), "콤마 다중값은 칩 여러 개");
+        assertEquals(List.of("jobs.employment"), chips("T-N-OTHER-CAT"));
+    }
+
+    @Test
+    void 묶음표에_없는_중분류만_가진_정책은_분류_없이_적재한다() {
+        raw("T-N-UNKNOWN", APPROVED, "새로운분류", LATEST, null);
+
+        NormalizeResult result = normalizer.normalize();
+
+        assertTrue(active("T-N-UNKNOWN"), "데이터는 남겨 둔다 (묶음표에 넣으면 다음 정규화부터 보인다)");
+        assertTrue(chips("T-N-UNKNOWN").isEmpty());
+        assertEquals(1, result.uncategorized());
     }
 
     @Test
@@ -198,6 +221,13 @@ class PolicyNormalizerTest {
                 "SELECT EXISTS (SELECT 1 FROM policy WHERE policy_no = ?)", Boolean.class, no));
     }
 
+    private List<String> chips(String no) {
+        return jdbc.queryForList("""
+                SELECT pc.category_code FROM policy_category pc JOIN policy p ON p.id = pc.policy_id
+                WHERE p.policy_no = ? ORDER BY pc.category_code
+                """, String.class, no);
+    }
+
     private long idOf(String no) {
         return jdbc.queryForObject("SELECT id FROM policy WHERE policy_no = ?", Long.class, no);
     }
@@ -206,7 +236,8 @@ class PolicyNormalizerTest {
         return jdbc.queryForList("""
                 SELECT p.policy_no, p.id, p.active, p.updated_at,
                        (SELECT COUNT(*) FROM policy_region pr WHERE pr.policy_id = p.id) AS regions,
-                       (SELECT COUNT(*) FROM policy_job pj WHERE pj.policy_id = p.id) AS jobs
+                       (SELECT COUNT(*) FROM policy_job pj WHERE pj.policy_id = p.id) AS jobs,
+                       (SELECT COUNT(*) FROM policy_category pc WHERE pc.policy_id = p.id) AS categories
                 FROM policy p
                 WHERE p.policy_no LIKE 'T-N-%'
                 ORDER BY p.policy_no

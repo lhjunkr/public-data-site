@@ -2,12 +2,17 @@ package kr.hojun.policymatch.normalize;
 
 import java.sql.Date;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.TreeSet;
+import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import kr.hojun.policymatch.category.CategoryCatalog;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -17,17 +22,22 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * policy_raw 에 쌓인 원본을 정규화 표(policy / policy_region / policy_job)로 옮긴다.
+ * policy_raw 에 쌓인 원본을 정규화 표(policy / policy_region / policy_job / policy_category)로 옮긴다.
  *
  * 멱등성 설계
  *  - policy 는 policy_no 가 UNIQUE 이므로 ON DUPLICATE KEY UPDATE 로 덮어쓴다.
- *  - 연결 표는 "지우고 다시 넣는다". 정책의 지원 지역이 줄어든 경우까지 반영하려면
- *    추가만 해서는 안 되고, 그 정책의 기존 연결을 비운 뒤 현재 값으로 다시 채워야 한다.
+ *  - 연결 표는 현재 값과 같게 맞춘다. 정책의 지원 지역이 줄어든 경우까지 반영하려면 추가만 해서는 안 되고,
+ *    달라졌으면 그 정책의 기존 연결을 비운 뒤 현재 값으로 다시 채운다. 같으면 아무것도 쓰지 않는다.
  *
- * 선정과 비활성 (D-014, D-017)
- *  - 선정 규칙에 맞는 정책은 전부 적재하고 active = TRUE 로 둔다. 건수 상한은 없다.
+ * 선정과 비활성 (D-014, D-017, D-018)
+ *  - 승인된 정책은 분류와 상관없이 전부 적재하고 active = TRUE 로 둔다. 건수 상한은 없다.
+ *    화면에 어느 분류로 보일지는 묶음표(CategoryCatalog)가 정하고, policy_category 에 칩 코드로 남긴다.
  *  - 기준은 마지막으로 "성공한" 수집이다. 실패한 수집은 정상 정책을 비활성하지 못한다.
  *  - 규칙에서 빠진 정책은 지우지 않고 active = FALSE 로 바꾼다. 다시 규칙에 들면 TRUE 로 돌아온다.
+ *
+ * 쓰기량 (D-018): 대상이 742건에서 3,763건으로 늘어 매일 도는 배치의 쓰기를 줄였다.
+ *  - 지역 코드 마스터(region)는 이미 있는 코드를 처음에 한 번 읽어 두고 새 코드만 넣는다.
+ *  - 연결 표는 여러 행을 한 문장(INSERT ... VALUES (..), (..))으로 넣고, 값이 같으면 건너뛴다.
  */
 @Service
 public class PolicyNormalizer {
@@ -79,24 +89,25 @@ public class PolicyNormalizer {
     private final JdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
     private final CurationProperties props;
+    private final CategoryCatalog categories;
 
-    public PolicyNormalizer(JdbcTemplate jdbc, ObjectMapper objectMapper, CurationProperties props) {
+    public PolicyNormalizer(JdbcTemplate jdbc, ObjectMapper objectMapper, CurationProperties props,
+                            CategoryCatalog categories) {
         this.jdbc = jdbc;
         this.objectMapper = objectMapper;
         this.props = props;
+        this.categories = categories;
     }
 
     @Transactional
     public NormalizeResult normalize() {
-        List<String> targets = props.getMediumCategories();
-        if (targets.isEmpty()) {
-            throw new IllegalStateException("curation.medium-categories 가 비어 있습니다.");
-        }
-
-        List<String> rawRows = selectCandidates(targets);
+        long startedMs = System.currentTimeMillis();
+        List<String> rawRows = selectCandidates();
         log.info("선정 후보 {}건", rawRows.size());
 
-        int policies = 0, regionLinks = 0, jobLinks = 0, skipped = 0;
+        Set<String> knownRegions = new HashSet<>(jdbc.queryForList("SELECT code FROM region", String.class));
+        Set<String> unmappedMediums = new TreeSet<>();
+        int policies = 0, regionLinks = 0, jobLinks = 0, categoryLinks = 0, uncategorized = 0, skipped = 0;
         List<String> selectedNos = new ArrayList<>();
 
         for (String rawJson : rawRows) {
@@ -112,8 +123,18 @@ public class PolicyNormalizer {
             policies++;
             selectedNos.add(policyNo);
 
-            regionLinks += linkRegions(policyId, text(n, "zipCd"));
-            jobLinks += linkJobs(policyId, text(n, "jobCd"));
+            Set<String> regionCodes = split(text(n, "zipCd"));
+            addNewRegions(regionCodes, knownRegions);
+            regionLinks += syncLinks("policy_region", "region_code", policyId, regionCodes);
+            jobLinks += syncLinks("policy_job", "job_code", policyId, split(text(n, "jobCd")));
+
+            String mediums = text(n, "mclsfNm");
+            Set<String> chips = categories.chipsOf(mediums);
+            unmappedMediums.addAll(categories.unmappedOf(mediums));
+            categoryLinks += syncLinks("policy_category", "category_code", policyId, chips);
+            if (chips.isEmpty()) {
+                uncategorized++;
+            }
         }
 
         // 선정이 0건인데 그대로 진행하면 모든 정책이 비활성이 된다. 성공한 수집이 없거나 데이터가 깨진 상황으로 보고 멈춘다.
@@ -123,16 +144,20 @@ public class PolicyNormalizer {
         }
         int deactivated = deactivateOthers(selectedNos);
 
-        log.info("정규화 완료 — policy={} region={} job={} skipped={} deactivated={}",
-                policies, regionLinks, jobLinks, skipped, deactivated);
-        return new NormalizeResult(rawRows.size(), policies, regionLinks, jobLinks, skipped, deactivated);
+        if (!unmappedMediums.isEmpty()) {
+            // 새 분류가 생겼다는 신호다. 묶음표(application.yml 의 category.tabs)에 넣어야 화면에 나온다.
+            log.warn("묶음표에 없는 중분류 {}개: {}", unmappedMediums.size(), unmappedMediums);
+        }
+        log.info("정규화 완료 — policy={} region={} job={} category={} uncategorized={} skipped={} deactivated={} ({}ms)",
+                policies, regionLinks, jobLinks, categoryLinks, uncategorized, skipped, deactivated,
+                System.currentTimeMillis() - startedMs);
+        return new NormalizeResult(rawRows.size(), policies, regionLinks, jobLinks, categoryLinks,
+                uncategorized, skipped, deactivated);
     }
 
     /**
-     * 선정 규칙: 승인됨 + 대상 중분류(D-014) + 마지막으로 성공한 수집 이후 확인됨(D-017). 건수 상한은 없다.
+     * 선정 규칙: 승인됨(D-007) + 마지막으로 성공한 수집 이후 확인됨(D-017). 분류와 건수는 따지지 않는다(D-018).
      *
-     *  - 중분류에도 콤마 다중값이 있으므로(예: "취업,미래역량강화") 단순 IN 비교로는 놓친다.
-     *    FIND_IN_SET 은 콤마로 이어진 목록 안에 값이 있는지를 본다.
      *  - 한 번 수집할 때 모든 행에 같은 시각(수집 시작 시각)이 들어간다. 그래서 fetched_at 이
      *    마지막 성공 수집의 시작 시각보다 이전인 행은 그 뒤로 한 번도 보이지 않은 정책, 즉 API 에서 사라진 정책이다.
      *  - "같다(=)"가 아니라 "이후(>=)"로 비교한다. 성공 수집 뒤에 실패한 수집이 있어도, 거기서 갱신된 정책은
@@ -140,23 +165,13 @@ public class PolicyNormalizer {
      *  - 성공한 수집이 없으면 MAX 가 NULL 이라 아무것도 선정되지 않고, normalize() 가 0건으로 멈춘다.
      *  - 마감 여부는 여기서 보지 않는다. 매칭할 때 거른다(D-008).
      */
-    private List<String> selectCandidates(List<String> targets) {
-        StringBuilder sql = new StringBuilder("""
+    private List<String> selectCandidates() {
+        return jdbc.queryForList("""
                 SELECT raw_json FROM policy_raw
                 WHERE JSON_UNQUOTE(raw_json->'$.plcyAprvSttsCd') = ?
                   AND fetched_at >= (SELECT MAX(started_at) FROM collect_run WHERE status = 'SUCCESS')
-                  AND (""");
-        List<Object> args = new ArrayList<>();
-        args.add(props.getApprovedStatusCode());
-
-        for (int i = 0; i < targets.size(); i++) {
-            sql.append(i == 0 ? "" : " OR ")
-               .append("FIND_IN_SET(?, JSON_UNQUOTE(raw_json->'$.mclsfNm')) > 0");
-            args.add(targets.get(i));
-        }
-        sql.append(") ORDER BY policy_no");
-
-        return jdbc.queryForList(sql.toString(), String.class, args.toArray());
+                ORDER BY policy_no
+                """, String.class, props.getApprovedStatusCode());
     }
 
     /** 이번에 선정된 정책 번호 목록에 없는 정책을 비활성으로 바꾸고, 바뀐 행 수를 돌려준다. */
@@ -210,31 +225,44 @@ public class PolicyNormalizer {
     /**
      * policy_region 은 region 표를 참조한다. 아직 지역 코드 마스터가 없으므로,
      * 처음 만나는 코드는 그 자리에서 만들어 둔다(정식 지역명 채우기는 별도 과제).
+     * 이미 있는 코드는 normalize() 시작 때 읽어 둔 knownRegions 로 걸러 다시 넣지 않는다.
      */
-    private int linkRegions(long policyId, String zipCd) {
-        Set<String> codes = split(zipCd);
-        jdbc.update("DELETE FROM policy_region WHERE policy_id = ?", policyId);
-        if (codes.isEmpty()) {
-            return 0;
+    private void addNewRegions(Set<String> codes, Set<String> knownRegions) {
+        List<String> newCodes = codes.stream().filter(c -> !knownRegions.contains(c)).toList();
+        if (newCodes.isEmpty()) {
+            return;
         }
-        for (String code : codes) {
-            String sido = code.length() >= 2 ? code.substring(0, 2) : code;
-            jdbc.update("INSERT IGNORE INTO region (code, sido, name) VALUES (?, ?, ?)", code, sido, code);
-        }
-        List<Object[]> batch = codes.stream().map(c -> new Object[] { policyId, c }).toList();
-        jdbc.batchUpdate("INSERT IGNORE INTO policy_region (policy_id, region_code) VALUES (?, ?)", batch);
-        return codes.size();
+        insertRows("INSERT IGNORE INTO region (code, sido, name) VALUES ", "(?, ?, ?)", newCodes,
+                code -> new Object[] { code, code.length() >= 2 ? code.substring(0, 2) : code, code });
+        knownRegions.addAll(newCodes);
     }
 
-    private int linkJobs(long policyId, String jobCd) {
-        Set<String> codes = split(jobCd);
-        jdbc.update("DELETE FROM policy_job WHERE policy_id = ?", policyId);
-        if (codes.isEmpty()) {
-            return 0;
+    /**
+     * 한 정책의 연결 표(policy_region / policy_job / policy_category)를 values 와 같게 맞추고 연결 수를 돌려준다.
+     * 이미 같으면 아무것도 쓰지 않는다. table · column 은 이 클래스 안의 상수만 넘긴다(사용자 입력이 아니다).
+     */
+    private int syncLinks(String table, String column, long policyId, Set<String> values) {
+        List<String> current = jdbc.queryForList(
+                "SELECT " + column + " FROM " + table + " WHERE policy_id = ?", String.class, policyId);
+        if (current.size() == values.size() && values.containsAll(current)) {
+            return values.size();
         }
-        List<Object[]> batch = codes.stream().map(c -> new Object[] { policyId, c }).toList();
-        jdbc.batchUpdate("INSERT IGNORE INTO policy_job (policy_id, job_code) VALUES (?, ?)", batch);
-        return codes.size();
+        jdbc.update("DELETE FROM " + table + " WHERE policy_id = ?", policyId);
+        if (!values.isEmpty()) {
+            insertRows("INSERT INTO " + table + " (policy_id, " + column + ") VALUES ", "(?, ?)", values,
+                    value -> new Object[] { policyId, value });
+        }
+        return values.size();
+    }
+
+    /** 여러 행을 한 문장으로 넣는다: INSERT ... VALUES (?, ?), (?, ?), ... 값은 모두 파라미터로 넘긴다. */
+    private <T> void insertRows(String head, String rowPlaceholder, Collection<T> items, Function<T, Object[]> toRow) {
+        List<Object> args = new ArrayList<>();
+        for (T item : items) {
+            Collections.addAll(args, toRow.apply(item));
+        }
+        String sql = head + String.join(", ", Collections.nCopies(items.size(), rowPlaceholder));
+        jdbc.update(sql, args.toArray());
     }
 
     /** 콤마 다중값을 쪼갠다. 같은 값이 두 번 오는 경우가 실제로 있어 집합으로 받는다. */

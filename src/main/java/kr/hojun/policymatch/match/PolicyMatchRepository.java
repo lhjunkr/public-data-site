@@ -1,6 +1,11 @@
 package kr.hojun.policymatch.match;
 
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import kr.hojun.policymatch.category.CategoryCatalog;
+import org.springframework.jdbc.core.RowCallbackHandler;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -20,6 +25,10 @@ import org.springframework.stereotype.Repository;
  *  - 상한을 넘으면 미충족.
  *  - 상한 이하인데 하한이 있으면(> 0) 판단불가. 하한 칸에 다른 대상의 기준이 들어간 사례가 있다
  *    (예: 청년 4,000 / 신혼부부 6,000). 상한을 넘는 경우는 어느 해석으로도 미충족이라 그대로 둔다.
+ *
+ * 분류 (D-018) — 열린 탭의 칩(:openChips)을 하나라도 가진 정책만 낸다.
+ *  - 닫힌 탭(일자리)의 칩만 가진 정책과 분류가 없는 정책은 결과에 나오지 않는다.
+ *  - 결과마다 열린 칩 코드 목록(categories)을 붙인다. 화면은 이것으로 탭·칩별 건수를 센다.
  */
 @Repository
 public class PolicyMatchRepository {
@@ -47,22 +56,37 @@ public class PolicyMatchRepository {
                     SELECT 1 FROM policy_region pr
                     JOIN region r ON r.code = pr.region_code
                     WHERE pr.policy_id = p.id AND r.sido = :sido )
+              AND EXISTS (
+                    SELECT 1 FROM policy_category pc
+                    WHERE pc.policy_id = p.id AND pc.category_code IN (:openChips) )
             ORDER BY p.view_count DESC, p.id
             """;
 
-    private final NamedParameterJdbcTemplate jdbc;
+    /** 결과로 나간 정책들의 열린 칩 코드. IN (:ids) 는 목록 길이만큼 ? 로 펼쳐진다. */
+    private static final String CATEGORIES_SQL = """
+            SELECT policy_id, category_code
+            FROM policy_category
+            WHERE policy_id IN (:ids) AND category_code IN (:openChips)
+            ORDER BY policy_id, category_code
+            """;
 
-    public PolicyMatchRepository(NamedParameterJdbcTemplate jdbc) {
+    private final NamedParameterJdbcTemplate jdbc;
+    private final CategoryCatalog catalog;
+
+    public PolicyMatchRepository(NamedParameterJdbcTemplate jdbc, CategoryCatalog catalog) {
         this.jdbc = jdbc;
+        this.catalog = catalog;
     }
 
     public List<MatchedPolicy> match(int age, String sido, Long income) {
+        List<String> openChips = catalog.openChipCodes();
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("age", age)
                 .addValue("sido", sido)
-                .addValue("income", income);   // null 이면 SQL 에서 :income IS NULL 이 참
+                .addValue("income", income)    // null 이면 SQL 에서 :income IS NULL 이 참
+                .addValue("openChips", openChips);
 
-        return jdbc.query(MATCH_SQL, params, (rs, rowNum) -> {
+        List<MatchedPolicy> policies = jdbc.query(MATCH_SQL, params, (rs, rowNum) -> {
             IncomeStatus status = IncomeStatus.valueOf(rs.getString("income_status"));
             String earnEtc = rs.getString("earn_etc_cn");
             String extra = rs.getString("extra_qualification");
@@ -77,8 +101,24 @@ public class PolicyMatchRepository {
                     rs.getString("ref_url"),
                     status,
                     "0043003".equals(rs.getString("earn_cnd_se_cd")) ? earnEtc : null,
-                    extra != null && !extra.isBlank());
+                    extra != null && !extra.isBlank(),
+                    List.of());
         });
+        if (policies.isEmpty()) {
+            return policies;
+        }
+
+        Map<Long, List<String>> chipsById = new HashMap<>();
+        MapSqlParameterSource categoryParams = new MapSqlParameterSource()
+                .addValue("ids", policies.stream().map(MatchedPolicy::id).toList())
+                .addValue("openChips", openChips);
+        jdbc.query(CATEGORIES_SQL, categoryParams, (RowCallbackHandler) rs ->
+                chipsById.computeIfAbsent(rs.getLong("policy_id"), id -> new ArrayList<>())
+                        .add(rs.getString("category_code")));
+
+        return policies.stream()
+                .map(p -> p.withCategories(chipsById.getOrDefault(p.id(), List.of())))
+                .toList();
     }
 
     /** 존재하지 않는 시도 코드(예: 통합 전 옛 코드 "46")를 조용한 빈 결과 대신 400 으로 돌려보내기 위해 쓴다. */
