@@ -2,6 +2,7 @@ package kr.hojun.policymatch.normalize;
 
 import java.sql.Date;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -22,6 +23,10 @@ import tools.jackson.databind.ObjectMapper;
  *  - policy 는 policy_no 가 UNIQUE 이므로 ON DUPLICATE KEY UPDATE 로 덮어쓴다.
  *  - 연결 표는 "지우고 다시 넣는다". 정책의 지원 지역이 줄어든 경우까지 반영하려면
  *    추가만 해서는 안 되고, 그 정책의 기존 연결을 비운 뒤 현재 값으로 다시 채워야 한다.
+ *
+ * 선정과 비활성 (D-014)
+ *  - 선정 규칙에 맞는 정책은 전부 적재하고 active = TRUE 로 둔다. 건수 상한은 없다.
+ *  - 규칙에서 빠진 정책은 지우지 않고 active = FALSE 로 바꾼다. 다시 규칙에 들면 TRUE 로 돌아온다.
  */
 @Service
 public class PolicyNormalizer {
@@ -53,8 +58,16 @@ public class PolicyNormalizer {
                 apply_period_text = src.apply_period_text,
                 apply_start_date = src.apply_start_date, apply_end_date = src.apply_end_date,
                 apply_url = src.apply_url, ref_url = src.ref_url,
-                supervising_org = src.supervising_org, view_count = src.view_count
+                supervising_org = src.supervising_org, view_count = src.view_count,
+                active = TRUE
             """;
+
+    /**
+     * 이번에 선정되지 않은 정책을 비활성으로 바꾼다. {@code ?} 자리는 실행할 때 선정된 정책 수만큼 채운다.
+     * 이미 비활성인 행은 건드리지 않는다(active = TRUE 조건). 바뀐 것이 없는 행의 updated_at 을 지키기 위해서다.
+     */
+    private static final String DEACTIVATE_OTHERS =
+            "UPDATE policy SET active = FALSE WHERE active = TRUE AND policy_no NOT IN (%s)";
 
     private final JdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
@@ -74,9 +87,10 @@ public class PolicyNormalizer {
         }
 
         List<String> rawRows = selectCandidates(targets);
-        log.info("큐레이션 후보 {}건 (상한 {})", rawRows.size(), props.getLimit());
+        log.info("선정 후보 {}건", rawRows.size());
 
         int policies = 0, regionLinks = 0, jobLinks = 0, skipped = 0;
+        List<String> selectedNos = new ArrayList<>();
 
         for (String rawJson : rawRows) {
             JsonNode n = objectMapper.readTree(rawJson);
@@ -89,24 +103,38 @@ public class PolicyNormalizer {
             upsertPolicy(n, policyNo);
             long policyId = policyIdOf(policyNo);
             policies++;
+            selectedNos.add(policyNo);
 
             regionLinks += linkRegions(policyId, text(n, "zipCd"));
             jobLinks += linkJobs(policyId, text(n, "jobCd"));
         }
 
-        log.info("정규화 완료 — policy={} region={} job={} skipped={}",
-                policies, regionLinks, jobLinks, skipped);
-        return new NormalizeResult(rawRows.size(), policies, regionLinks, jobLinks, skipped);
+        // 선정이 0건인데 그대로 진행하면 모든 정책이 비활성이 된다. 수집이 비었거나 깨진 상황으로 보고 멈춘다.
+        if (selectedNos.isEmpty()) {
+            throw new IllegalStateException(
+                    "선정된 정책이 0건이라 비활성 처리를 하지 않고 중단합니다. policy_raw 수집 결과를 확인하십시오.");
+        }
+        int deactivated = deactivateOthers(selectedNos);
+
+        log.info("정규화 완료 — policy={} region={} job={} skipped={} deactivated={}",
+                policies, regionLinks, jobLinks, skipped, deactivated);
+        return new NormalizeResult(rawRows.size(), policies, regionLinks, jobLinks, skipped, deactivated);
     }
 
     /**
-     * 중분류에도 콤마 다중값이 있으므로(예: "취업,미래역량강화") 단순 IN 비교로는 놓친다.
-     * FIND_IN_SET 은 콤마로 이어진 목록 안에 값이 있는지를 본다.
+     * D-014 선정 규칙: 승인됨 + 대상 중분류 + 가장 최근 수집에서 확인됨. 건수 상한은 없다.
+     *
+     *  - 중분류에도 콤마 다중값이 있으므로(예: "취업,미래역량강화") 단순 IN 비교로는 놓친다.
+     *    FIND_IN_SET 은 콤마로 이어진 목록 안에 값이 있는지를 본다.
+     *  - 한 번 수집할 때 모든 행에 같은 시각(수집 시작 시각)이 들어간다. 그래서 fetched_at 이
+     *    가장 최근 값과 다른 행은 "이번 수집에서 보이지 않은 정책", 즉 API 에서 사라진 정책이다.
+     *  - 마감 여부는 여기서 보지 않는다. 매칭할 때 거른다(D-008).
      */
     private List<String> selectCandidates(List<String> targets) {
         StringBuilder sql = new StringBuilder("""
                 SELECT raw_json FROM policy_raw
                 WHERE JSON_UNQUOTE(raw_json->'$.plcyAprvSttsCd') = ?
+                  AND fetched_at = (SELECT MAX(fetched_at) FROM policy_raw)
                   AND (""");
         List<Object> args = new ArrayList<>();
         args.add(props.getApprovedStatusCode());
@@ -116,9 +144,15 @@ public class PolicyNormalizer {
                .append("FIND_IN_SET(?, JSON_UNQUOTE(raw_json->'$.mclsfNm')) > 0");
             args.add(targets.get(i));
         }
-        sql.append(") ORDER BY policy_no LIMIT ").append(props.getLimit());
+        sql.append(") ORDER BY policy_no");
 
         return jdbc.queryForList(sql.toString(), String.class, args.toArray());
+    }
+
+    /** 이번에 선정된 정책 번호 목록에 없는 정책을 비활성으로 바꾸고, 바뀐 행 수를 돌려준다. */
+    private int deactivateOthers(List<String> selectedNos) {
+        String placeholders = String.join(",", Collections.nCopies(selectedNos.size(), "?"));
+        return jdbc.update(DEACTIVATE_OTHERS.formatted(placeholders), selectedNos.toArray());
     }
 
     private void upsertPolicy(JsonNode n, String policyNo) {
