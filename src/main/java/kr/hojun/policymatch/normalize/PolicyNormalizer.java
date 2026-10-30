@@ -24,8 +24,9 @@ import tools.jackson.databind.ObjectMapper;
  *  - 연결 표는 "지우고 다시 넣는다". 정책의 지원 지역이 줄어든 경우까지 반영하려면
  *    추가만 해서는 안 되고, 그 정책의 기존 연결을 비운 뒤 현재 값으로 다시 채워야 한다.
  *
- * 선정과 비활성 (D-014)
+ * 선정과 비활성 (D-014, D-017)
  *  - 선정 규칙에 맞는 정책은 전부 적재하고 active = TRUE 로 둔다. 건수 상한은 없다.
+ *  - 기준은 마지막으로 "성공한" 수집이다. 실패한 수집은 정상 정책을 비활성하지 못한다.
  *  - 규칙에서 빠진 정책은 지우지 않고 active = FALSE 로 바꾼다. 다시 규칙에 들면 TRUE 로 돌아온다.
  */
 @Service
@@ -115,10 +116,10 @@ public class PolicyNormalizer {
             jobLinks += linkJobs(policyId, text(n, "jobCd"));
         }
 
-        // 선정이 0건인데 그대로 진행하면 모든 정책이 비활성이 된다. 수집이 비었거나 깨진 상황으로 보고 멈춘다.
+        // 선정이 0건인데 그대로 진행하면 모든 정책이 비활성이 된다. 성공한 수집이 없거나 데이터가 깨진 상황으로 보고 멈춘다.
         if (selectedNos.isEmpty()) {
-            throw new IllegalStateException(
-                    "선정된 정책이 0건이라 비활성 처리를 하지 않고 중단합니다. policy_raw 수집 결과를 확인하십시오.");
+            throw new IllegalStateException("선정된 정책이 0건이라 비활성 처리를 하지 않고 중단합니다. "
+                    + "성공한 수집(collect_run 의 SUCCESS)이 있는지, policy_raw 가 비어 있지 않은지 확인하십시오.");
         }
         int deactivated = deactivateOthers(selectedNos);
 
@@ -128,19 +129,22 @@ public class PolicyNormalizer {
     }
 
     /**
-     * D-014 선정 규칙: 승인됨 + 대상 중분류 + 가장 최근 수집에서 확인됨. 건수 상한은 없다.
+     * 선정 규칙: 승인됨 + 대상 중분류(D-014) + 마지막으로 성공한 수집 이후 확인됨(D-017). 건수 상한은 없다.
      *
      *  - 중분류에도 콤마 다중값이 있으므로(예: "취업,미래역량강화") 단순 IN 비교로는 놓친다.
      *    FIND_IN_SET 은 콤마로 이어진 목록 안에 값이 있는지를 본다.
      *  - 한 번 수집할 때 모든 행에 같은 시각(수집 시작 시각)이 들어간다. 그래서 fetched_at 이
-     *    가장 최근 값과 다른 행은 "이번 수집에서 보이지 않은 정책", 즉 API 에서 사라진 정책이다.
+     *    마지막 성공 수집의 시작 시각보다 이전인 행은 그 뒤로 한 번도 보이지 않은 정책, 즉 API 에서 사라진 정책이다.
+     *  - "같다(=)"가 아니라 "이후(>=)"로 비교한다. 성공 수집 뒤에 실패한 수집이 있어도, 거기서 갱신된 정책은
+     *    존재가 확인된 것이고, 갱신되지 못한 정책도 성공 수집 때의 값으로 남아 함께 선정된다.
+     *  - 성공한 수집이 없으면 MAX 가 NULL 이라 아무것도 선정되지 않고, normalize() 가 0건으로 멈춘다.
      *  - 마감 여부는 여기서 보지 않는다. 매칭할 때 거른다(D-008).
      */
     private List<String> selectCandidates(List<String> targets) {
         StringBuilder sql = new StringBuilder("""
                 SELECT raw_json FROM policy_raw
                 WHERE JSON_UNQUOTE(raw_json->'$.plcyAprvSttsCd') = ?
-                  AND fetched_at = (SELECT MAX(fetched_at) FROM policy_raw)
+                  AND fetched_at >= (SELECT MAX(started_at) FROM collect_run WHERE status = 'SUCCESS')
                   AND (""");
         List<Object> args = new ArrayList<>();
         args.add(props.getApprovedStatusCode());

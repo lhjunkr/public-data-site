@@ -87,9 +87,11 @@ public class YouthApiClient {
     }
 
     /**
-     * 공공 API 는 간헐적으로 5xx 나 연결 끊김을 낸다. 한 번 실패했다고 28페이지짜리 수집을
+     * 공공 API 는 간헐적으로 5xx 나 연결 끊김을 낸다. 한 번 실패했다고 38페이지짜리 수집을
      * 통째로 버리는 것은 낭비이므로, 같은 페이지를 짧은 간격으로 다시 시도한다.
      * 다만 인증키 오류 같은 4xx 는 몇 번을 다시 걸어도 결과가 같으므로 즉시 포기한다.
+     * 예외는 400 과 429 다(D-017). 이 API 는 일시적인 오류에도 400(e002 invalid param data)을 준다.
+     * 10/30 수집에서 9페이지가 400 으로 실패했는데, 같은 요청을 다시 보내자 200 이었다.
      */
     private String getWithRetry(URI uri, int pageNum) {
         RuntimeException last = null;
@@ -99,8 +101,9 @@ public class YouthApiClient {
                 return restClient.get().uri(uri).retrieve().body(String.class);
 
             } catch (HttpClientErrorException e) {
-                // 4xx — 재시도해도 소용없다. 단 429(요청 과다)만 예외로 둔다.
-                if (e.getStatusCode().value() != 429) {
+                // 4xx — 재시도해도 소용없다. 단 400(이 API 의 일시 오류)과 429(요청 과다)는 다시 시도한다.
+                int code = e.getStatusCode().value();
+                if (code != 400 && code != 429) {
                     throw new YouthApiException(describe(pageNum, attempt, e), e);
                 }
                 last = e;
