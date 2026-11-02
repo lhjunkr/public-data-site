@@ -1,6 +1,5 @@
 package kr.hojun.policymatch.collect;
 
-import java.time.format.DateTimeFormatter;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -17,8 +16,6 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/data-status")
 public class DataStatusController {
 
-    private static final DateTimeFormatter FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
-
     private final CollectRunStore runs;
 
     public DataStatusController(CollectRunStore runs) {
@@ -27,6 +24,6 @@ public class DataStatusController {
 
     @GetMapping
     public DataStatusResponse status() {
-        return new DataStatusResponse(runs.lastSuccessStartedAt().map(FORMAT::format).orElse(null));
+        return new DataStatusResponse(runs.lastSuccessStartedAt().orElse(null));
     }
 }

@@ -46,11 +46,19 @@ public class CollectRunStore {
         return key.getKey().longValue();
     }
 
-    /** 마지막으로 성공한 수집이 시작된 시각. 성공한 수집이 없으면 비어 있다. */
-    public Optional<LocalDateTime> lastSuccessStartedAt() {
-        Timestamp t = jdbc.queryForObject(
-                "SELECT MAX(started_at) FROM collect_run WHERE status = 'SUCCESS'", Timestamp.class);
-        return Optional.ofNullable(t).map(Timestamp::toLocalDateTime);
+    /**
+     * 마지막으로 성공한 수집이 시작된 시각을 "yyyy-MM-dd HH:mm" 글자로 돌려준다. 성공한 수집이 없으면 비어 있다.
+     *
+     * 글자로 바꾸는 일을 DB(DATE_FORMAT)에서 하는 이유: DATETIME 을 자바 시각 객체(Timestamp)로 읽으면
+     * JDBC 드라이버가 연결 시간대(serverTimezone=Asia/Seoul)와 JVM 시간대의 차이만큼 시각을 옮긴다.
+     * 서버는 JVM 도 한국 시간이라 차이가 없지만, CI 는 JVM 이 UTC 라 9시간이 밀린다(11/2 CI 실패).
+     * 저장된 값(한국 시간)을 그대로 보여 주려면 DB 에서 글자로 꺼내는 편이 확실하다.
+     */
+    public Optional<String> lastSuccessStartedAt() {
+        String text = jdbc.queryForObject(
+                "SELECT DATE_FORMAT(MAX(started_at), '%Y-%m-%d %H:%i') FROM collect_run WHERE status = 'SUCCESS'",
+                String.class);
+        return Optional.ofNullable(text);
     }
 
     public void finish(long id, String status, int totCount, int itemsSeen, String message) {
