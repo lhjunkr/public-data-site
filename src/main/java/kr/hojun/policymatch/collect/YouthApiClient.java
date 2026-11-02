@@ -1,6 +1,7 @@
 package kr.hojun.policymatch.collect;
 
 import java.net.URI;
+import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
@@ -27,6 +28,9 @@ public class YouthApiClient {
 
     private static final Logger log = LoggerFactory.getLogger(YouthApiClient.class);
     private static final int MAX_ATTEMPTS = 3;
+
+    /** 4xx 지만 이 API 가 일시 오류에도 내는 코드 (D-017, D-022). 나머지 4xx 는 바로 포기한다. */
+    private static final Set<Integer> RETRYABLE_4XX = Set.of(400, 403, 429);
     private static final long RETRY_BASE_DELAY_MS = 1000;
 
     private final YouthApiProperties props;
@@ -89,9 +93,12 @@ public class YouthApiClient {
     /**
      * 공공 API 는 간헐적으로 5xx 나 연결 끊김을 낸다. 한 번 실패했다고 38페이지짜리 수집을
      * 통째로 버리는 것은 낭비이므로, 같은 페이지를 짧은 간격으로 다시 시도한다.
-     * 다만 인증키 오류 같은 4xx 는 몇 번을 다시 걸어도 결과가 같으므로 즉시 포기한다.
-     * 예외는 400 과 429 다(D-017). 이 API 는 일시적인 오류에도 400(e002 invalid param data)을 준다.
-     * 10/30 수집에서 9페이지가 400 으로 실패했는데, 같은 요청을 다시 보내자 200 이었다.
+     * 다만 4xx 는 대개 몇 번을 다시 걸어도 결과가 같으므로 즉시 포기한다.
+     * 예외는 400 · 403 · 429 다(D-017, D-022). 이 API 는 일시적인 오류에도 400 과 403 을 준다.
+     *  - 10/30 수집: 9페이지가 400(e002 invalid param data)으로 실패. 같은 요청을 다시 보내자 200.
+     *  - 11/1 자동 갱신: 31페이지가 403(e001 invalid api key)으로 실패. 같은 키로 1~30페이지는 직전 48초 동안
+     *    성공했고 다음 날에는 39페이지 모두 성공했다.
+     * 인증키가 정말 틀린 경우에도 3번(대기 약 3초) 만에 포기하므로 손해가 작다.
      */
     private String getWithRetry(URI uri, int pageNum) {
         RuntimeException last = null;
@@ -101,9 +108,9 @@ public class YouthApiClient {
                 return restClient.get().uri(uri).retrieve().body(String.class);
 
             } catch (HttpClientErrorException e) {
-                // 4xx — 재시도해도 소용없다. 단 400(이 API 의 일시 오류)과 429(요청 과다)는 다시 시도한다.
+                // 4xx — 대개 재시도해도 소용없다. 단 이 API 가 일시 오류에 쓰는 400 · 403 과 429(요청 과다)는 다시 시도한다.
                 int code = e.getStatusCode().value();
-                if (code != 400 && code != 429) {
+                if (!RETRYABLE_4XX.contains(code)) {
                     throw new YouthApiException(describe(pageNum, attempt, e), e);
                 }
                 last = e;
