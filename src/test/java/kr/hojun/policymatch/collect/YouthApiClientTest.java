@@ -17,7 +17,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * 재시도 규칙 테스트 (D-017). JDK 에 들어 있는 작은 HTTP 서버를 띄워 실제 HTTP 응답 코드를 돌려준다.
+ * 재시도 규칙 테스트 (D-017, D-022). JDK 에 들어 있는 작은 HTTP 서버를 띄워 실제 HTTP 응답 코드를 돌려준다.
  */
 @SpringBootTest
 class YouthApiClientTest {
@@ -48,8 +48,27 @@ class YouthApiClientTest {
     }
 
     @Test
-    void 인증_오류_같은_다른_4xx는_바로_포기한다() throws IOException {
+    void 일시적인_403도_다시_시도해_성공한다() throws IOException {
+        // 11/1 관측: 31페이지가 403(e001 invalid api key)으로 실패. 같은 키로 앞 30페이지는 성공했다
+        YouthApiClient client = clientReturning(call -> call == 1 ? 403 : 200);
+
+        client.fetchPage(1);
+
+        assertEquals(2, calls.get());
+    }
+
+    @Test
+    void 계속_403이면_3번_시도하고_포기한다() throws IOException {
+        // 인증키가 정말 틀린 경우. 끝없이 다시 걸지 않는다
         YouthApiClient client = clientReturning(call -> 403);
+
+        assertThrows(YouthApiException.class, () -> client.fetchPage(1));
+        assertEquals(3, calls.get());
+    }
+
+    @Test
+    void 그_밖의_4xx는_바로_포기한다() throws IOException {
+        YouthApiClient client = clientReturning(call -> 404);
 
         assertThrows(YouthApiException.class, () -> client.fetchPage(1));
         assertEquals(1, calls.get(), "다시 걸어도 결과가 같으므로 한 번만 호출");
