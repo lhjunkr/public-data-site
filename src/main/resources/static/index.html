@@ -140,6 +140,34 @@
   .links { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 14px; }
   .links a { color: #1a5fb4; font-size: 14px; }
 
+  /* D-023: 신청처 확인 안내 · 출처 · 기준 시각 */
+  .notice {
+    font-size: 13px;
+    color: #555;
+    background: #f1f5fb;
+    border: 1px solid #dde6f3;
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin: 14px 0 0;
+  }
+  #hint { font-size: 13px; color: #666; margin: -6px 2px 12px; }
+  #hint:empty { display: none; }
+  button.more {
+    margin-top: 16px;
+    background: #fff;
+    color: #1a5fb4;
+    border: 1px solid #1a5fb4;
+  }
+  footer {
+    margin-top: 40px;
+    padding-top: 16px;
+    border-top: 1px solid #e5e5e5;
+    font-size: 12px;
+    color: #777;
+  }
+  footer p { margin: 4px 0; }
+  footer a { color: #1a5fb4; }
+
   details { margin-top: 12px; }
   summary { cursor: pointer; font-size: 14px; color: #1a5fb4; }
   .support-content {
@@ -183,11 +211,21 @@
   </div>
 </form>
 
+<p class="notice">최종 자격과 지원 내용은 각 정책의 신청처에서 확인하세요.</p>
+
 <p id="error"></p>
 <p id="summary"></p>
+<p id="hint"></p>
 <div id="tabs" class="filter-row" role="group" aria-label="분야"></div>
 <div id="chips" class="filter-row" role="group" aria-label="세부 분야"></div>
 <ul id="results"></ul>
+<button type="button" id="more" class="more" hidden></button>
+
+<footer>
+  <p>정책 정보 출처: <a href="https://www.youthcenter.go.kr" target="_blank" rel="noopener noreferrer">온통청년</a> 청년정책 Open API (국무조정실 · 한국고용정보원)</p>
+  <p id="updated"></p>
+  <p>비영리 개인 프로젝트입니다. 정책 정보는 매일 새벽 원본에서 다시 받아 오며, 원본과 다를 수 있습니다.</p>
+</footer>
 
 <script>
 (function () {
@@ -204,6 +242,12 @@
   const resultsEl = document.getElementById("results");
   const tabsEl = document.getElementById("tabs");
   const chipsEl = document.getElementById("chips");
+  const hintEl = document.getElementById("hint");
+  const moreBtn = document.getElementById("more");
+  const updatedEl = document.getElementById("updated");
+
+  const PAGE_SIZE = 20;      // 한 번에 그리는 카드 수. 휴대폰에서 485건을 한꺼번에 그리지 않는다
+  let shown = PAGE_SIZE;     // 지금 보여 주는 카드 수
 
   // ---- 유틸 ----------------------------------------------------------------
 
@@ -363,12 +407,28 @@
 
   function renderList() {
     resultsEl.textContent = "";
-    for (const policy of currentPolicies) {
-      if (isVisible(policy)) resultsEl.appendChild(createCard(policy));
-    }
+    appendCards(0);
   }
 
+  // from 번째부터 shown 번째까지 카드를 붙이고 "더 보기" 버튼을 고친다
+  function appendCards(from) {
+    const visible = currentPolicies.filter(isVisible);
+    for (const policy of visible.slice(from, shown)) {
+      resultsEl.appendChild(createCard(policy));
+    }
+    moreBtn.hidden = visible.length <= shown;
+    moreBtn.textContent = "더 보기 (" + Math.min(shown, visible.length) + " / " + visible.length + "건)";
+  }
+
+  moreBtn.addEventListener("click", function () {
+    const from = shown;
+    shown += PAGE_SIZE;
+    appendCards(from);   // 이미 그린 카드는 그대로 두고 뒤에만 붙인다 (펼친 상세가 접히지 않게)
+  });
+
+  // 새로 검색하거나 탭 · 칩을 바꾸면 처음 20건부터 다시 보여 준다
   function renderPage() {
+    shown = PAGE_SIZE;
     renderFilters();
     renderList();
   }
@@ -426,7 +486,7 @@
       const note = document.createElement("span");
       note.className = "badge-note";
       note.textContent =
-        "판단불가는 소득 조건을 자동으로 확인할 수 없다는 뜻입니다. 원문을 확인하세요.";
+        "소득 조건을 자동으로 비교할 수 없습니다(글로만 적힌 기준이거나, 연소득을 입력하지 않음). 원문을 확인하세요.";
       badgeRow.appendChild(note);
     }
     li.appendChild(badgeRow);
@@ -486,19 +546,42 @@
 
   // ---- 결과 렌더링 ---------------------------------------------------------
 
-  function renderResults(data) {
+  // query: 이번 검색에 선택 항목을 넣었는지 { job: true/false, income: true/false }
+  function renderResults(data, query) {
     currentPolicies = Array.isArray(data.policies) ? data.policies : [];
     activeTab = "all";
     activeChip = "all";
 
     if (currentPolicies.length === 0) {
       summaryEl.textContent = "조건에 맞는 정책이 없습니다";
+      hintEl.textContent = (query.job || query.income)
+        ? "취업 상태를 '선택 안 함'으로 바꾸거나 연소득을 비우면 더 넓게 찾을 수 있습니다."
+        : "나이와 시도를 다시 확인해 주세요. 신청 기간이 끝난 정책은 결과에서 빠집니다.";
       renderPage();
       return;
     }
 
     summaryEl.textContent = "총 " + currentPolicies.length + "건";
+    hintEl.textContent = query.income
+      ? ""
+      : "연소득을 입력하면 금액 기준이 있는 정책의 소득 조건을 자동으로 비교합니다.";
     renderPage();
+  }
+
+  // ---- 정책 정보 기준 시각 (D-023) ---------------------------------------------
+  // GET /api/v1/data-status → {updatedAt:"2026-11-02 04:10"} (성공한 수집이 없으면 null)
+
+  async function loadDataStatus() {
+    try {
+      const response = await fetch("/api/v1/data-status");
+      if (!response.ok) return;
+      const data = await response.json();
+      if (data && data.updatedAt) {
+        updatedEl.textContent = "정책 정보 기준: " + data.updatedAt + " (매일 새벽 갱신)";
+      }
+    } catch (e) {
+      // 기준 시각을 못 불러와도 검색은 된다
+    }
   }
 
   // ---- 폼 제출 (매칭 API) --------------------------------------------------
@@ -507,6 +590,7 @@
     event.preventDefault();
     clearError();
     summaryEl.textContent = "";
+    hintEl.textContent = "";
     currentPolicies = [];
     renderPage();
 
@@ -545,7 +629,7 @@
         return;
       }
 
-      renderResults(data || {});
+      renderResults(data || {}, { job: "job" in body, income: "income" in body });
     } catch (e) {
       showError("서버에 연결할 수 없습니다");
     } finally {
@@ -558,6 +642,7 @@
   loadSido();
   loadJobStatuses();
   loadCategories();
+  loadDataStatus();
 })();
 </script>
 

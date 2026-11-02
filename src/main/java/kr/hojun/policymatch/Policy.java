@@ -7,6 +7,13 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
+/**
+ * policy 표의 JPA 엔티티.
+ *
+ * 화면과 API 는 이 엔티티를 쓰지 않는다(조회는 JdbcTemplate SQL). 남겨 둔 이유는 앱이 뜰 때
+ * JPA 스키마 검증(ddl-auto=validate)이 Flyway 마이그레이션과 이 매핑이 어긋나지 않았는지 확인해 주기 때문이다.
+ * 이 엔티티를 그대로 내보내던 전체 목록 API(GET /api/v1/policies)는 D-023 에서 삭제했다.
+ */
 @Entity
 @Table(name = "policy")
 public class Policy {
