@@ -4,6 +4,7 @@ import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
+import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
@@ -43,6 +44,13 @@ public class CollectRunStore {
             return ps;
         }, key);
         return key.getKey().longValue();
+    }
+
+    /** 마지막으로 성공한 수집이 시작된 시각. 성공한 수집이 없으면 비어 있다. */
+    public Optional<LocalDateTime> lastSuccessStartedAt() {
+        Timestamp t = jdbc.queryForObject(
+                "SELECT MAX(started_at) FROM collect_run WHERE status = 'SUCCESS'", Timestamp.class);
+        return Optional.ofNullable(t).map(Timestamp::toLocalDateTime);
     }
 
     public void finish(long id, String status, int totCount, int itemsSeen, String message) {
