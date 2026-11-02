@@ -15,7 +15,81 @@
     color: #222;
     background: #fafafa;
   }
-  h1 { font-size: 22px; margin: 0 0 4px; }
+  h1 { font-size: 22px; margin: 0; }
+  .top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 4px; }
+  /* 상단 오른쪽 "의견 보내기" (D-024). 전역 button 스타일(파란 꽉 찬 버튼)을 덮어쓴다 */
+  button.feedback-open {
+    width: auto;
+    flex: 0 0 auto;
+    padding: 7px 12px;
+    font-size: 13px;
+    font-weight: 600;
+    background: #fff;
+    color: #1a5fb4;
+    border: 1px solid #1a5fb4;
+    border-radius: 16px;
+  }
+
+  /* 의견 보내기 창 */
+  .overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    z-index: 10;
+  }
+  .overlay[hidden] { display: none; }
+  .sheet {
+    background: #fff;
+    border-radius: 12px;
+    width: 100%;
+    max-width: 520px;
+    max-height: calc(100vh - 32px);
+    overflow-y: auto;
+    padding: 18px;
+  }
+  .sheet-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .sheet-head h2 { font-size: 18px; margin: 0; }
+  button.icon {
+    width: auto;
+    padding: 4px 10px;
+    font-size: 18px;
+    background: transparent;
+    color: #555;
+  }
+  #feedback-form { display: flex; flex-direction: column; flex-wrap: nowrap; gap: 6px; padding: 0; border: 0; border-radius: 0; }
+  #feedback-form[hidden] { display: none; }
+  #feedback-form label { font-size: 13px; color: #555; margin-top: 8px; }
+  #feedback-form textarea {
+    padding: 9px 10px;
+    font-size: 15px;
+    font-family: inherit;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    resize: vertical;
+  }
+  #feedback-form .hint { font-size: 12px; color: #888; }
+  .consent {
+    font-size: 12px;
+    color: #555;
+    background: #f6f7f9;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 8px 12px;
+    margin-top: 4px;
+  }
+  .consent[hidden] { display: none; }
+  .consent ul { margin: 4px 0 6px; padding-left: 18px; }
+  #feedback-form label.check { display: flex; align-items: center; gap: 6px; margin-top: 0; color: #333; font-size: 13px; }
+  #feedback-form label.check input { width: auto; }
+  /* 사람에게는 보이지 않는 칸 (자동 입력 프로그램 걸러내기) */
+  .hp { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }
+  .fb-error { color: #c0192b; font-size: 13px; margin: 6px 0 0; min-height: 1px; }
+  .fb-done { font-size: 15px; margin: 8px 0 4px; }
+  #feedback-form button[type="submit"] { margin-top: 8px; }
   .subtitle { color: #666; font-size: 14px; margin: 0 0 20px; }
 
   form {
@@ -180,7 +254,10 @@
 </head>
 <body>
 
-<h1>청년정책 매칭</h1>
+<header class="top">
+  <h1>청년정책 매칭</h1>
+  <button type="button" id="feedback-open" class="feedback-open">의견 보내기</button>
+</header>
 <p class="subtitle">나이·시도·취업 상태·소득으로 해당될 수 있는 정책을 찾아 드립니다.</p>
 
 <form id="search-form">
@@ -226,6 +303,40 @@
   <p id="updated"></p>
   <p>비영리 개인 프로젝트입니다. 정책 정보는 매일 새벽 원본에서 다시 받아 오며, 원본과 다를 수 있습니다.</p>
 </footer>
+
+<!-- 의견 보내기 창 (D-024) -->
+<div id="feedback" class="overlay" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="feedback-title">
+    <div class="sheet-head">
+      <h2 id="feedback-title">의견 보내기</h2>
+      <button type="button" id="feedback-close" class="icon" aria-label="닫기">✕</button>
+    </div>
+    <form id="feedback-form" novalidate>
+      <label for="fb-message">의견 (필수)</label>
+      <textarea id="fb-message" rows="6" maxlength="1000" placeholder="결과가 이상한 정책, 불편한 점, 있었으면 하는 기능을 자유롭게 적어 주세요."></textarea>
+      <span class="hint"><span id="fb-count">0</span> / 1,000자 · 이름이나 전화번호 같은 개인정보는 적지 마세요.</span>
+
+      <label for="fb-email">답장받을 이메일 (선택)</label>
+      <input type="email" id="fb-email" maxlength="254" placeholder="답장이 필요할 때만 적어 주세요" autocomplete="email">
+
+      <div id="fb-consent-box" class="consent" hidden>
+        <strong>개인정보 수집 · 이용 안내</strong>
+        <ul>
+          <li>항목: 이메일 주소</li>
+          <li>목적: 보내 주신 의견에 대한 답장</li>
+          <li>보관 기간: 답장한 뒤 바로 삭제. 답장하지 못한 경우에도 90일이 지나면 삭제</li>
+          <li>동의하지 않아도 의견은 보낼 수 있습니다. 이 경우 답장을 받을 수 없습니다.</li>
+        </ul>
+        <label class="check"><input type="checkbox" id="fb-consent"> 위 내용에 동의합니다</label>
+      </div>
+
+      <input type="text" id="fb-website" class="hp" tabindex="-1" autocomplete="off" aria-hidden="true">
+      <p id="fb-error" class="fb-error"></p>
+      <button type="submit" id="fb-submit">보내기</button>
+    </form>
+    <p id="fb-done" class="fb-done" hidden>보내 주셔서 감사합니다. 이메일을 남기셨다면 확인한 뒤 답장드리겠습니다.</p>
+  </div>
+</div>
 
 <script>
 (function () {
@@ -635,6 +746,100 @@
     } finally {
       submitBtn.disabled = false;
       submitBtn.textContent = "정책 찾기";
+    }
+  });
+
+  // ---- 의견 보내기 (D-024) -------------------------------------------------------
+  // POST /api/v1/feedback {message, email?, consent, website}
+  // website 는 화면에 보이지 않는 칸이다. 사람은 비워 두고, 자동 입력 프로그램만 채운다.
+
+  const fbOverlay = document.getElementById("feedback");
+  const fbForm = document.getElementById("feedback-form");
+  const fbMessage = document.getElementById("fb-message");
+  const fbCount = document.getElementById("fb-count");
+  const fbEmail = document.getElementById("fb-email");
+  const fbConsentBox = document.getElementById("fb-consent-box");
+  const fbConsent = document.getElementById("fb-consent");
+  const fbWebsite = document.getElementById("fb-website");
+  const fbError = document.getElementById("fb-error");
+  const fbSubmit = document.getElementById("fb-submit");
+  const fbDone = document.getElementById("fb-done");
+
+  function openFeedback() {
+    if (!fbDone.hidden) {   // 한 번 보낸 뒤 다시 열면 빈 양식부터
+      fbForm.reset();
+      fbForm.hidden = false;
+      fbDone.hidden = true;
+      fbConsentBox.hidden = true;
+      fbCount.textContent = "0";
+    }
+    fbError.textContent = "";
+    fbOverlay.hidden = false;
+    document.body.style.overflow = "hidden";   // 창 뒤의 페이지가 함께 스크롤되지 않게
+    fbMessage.focus();
+  }
+
+  function closeFeedback() {
+    fbOverlay.hidden = true;
+    document.body.style.overflow = "";
+  }
+
+  document.getElementById("feedback-open").addEventListener("click", openFeedback);
+  document.getElementById("feedback-close").addEventListener("click", closeFeedback);
+  fbOverlay.addEventListener("click", function (event) {
+    if (event.target === fbOverlay) closeFeedback();   // 창 바깥 어두운 곳을 누르면 닫기
+  });
+  document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape" && !fbOverlay.hidden) closeFeedback();
+  });
+
+  fbMessage.addEventListener("input", function () {
+    fbCount.textContent = String(fbMessage.value.length);
+  });
+
+  // 이메일을 적을 때만 개인정보 안내와 동의 칸을 보여 준다
+  fbEmail.addEventListener("input", function () {
+    fbConsentBox.hidden = fbEmail.value.trim() === "";
+  });
+
+  fbForm.addEventListener("submit", async function (event) {
+    event.preventDefault();
+    fbError.textContent = "";
+
+    const message = fbMessage.value.trim();
+    const email = fbEmail.value.trim();
+    if (message === "") {
+      fbError.textContent = "의견을 입력해 주세요.";
+      return;
+    }
+    if (email !== "" && !fbConsent.checked) {
+      fbError.textContent = "답장을 받으려면 개인정보 수집 · 이용에 동의해 주세요. 동의하지 않으려면 이메일 칸을 비워 주세요.";
+      return;
+    }
+
+    const body = { message: message, consent: fbConsent.checked, website: fbWebsite.value };
+    if (email !== "") body.email = email;
+
+    fbSubmit.disabled = true;
+    fbSubmit.textContent = "보내는 중...";
+    try {
+      const response = await fetch("/api/v1/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      const data = await response.json().catch(function () { return null; });
+      if (!response.ok) {
+        fbError.textContent = data && data.message ? data.message : "보내지 못했습니다. 잠시 후 다시 시도해 주세요.";
+        return;
+      }
+      fbForm.hidden = true;
+      fbDone.hidden = false;
+    } catch (e) {
+      fbError.textContent = "서버에 연결할 수 없습니다.";
+    } finally {
+      fbSubmit.disabled = false;
+      fbSubmit.textContent = "보내기";
     }
   });
 
