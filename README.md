@@ -4,7 +4,7 @@
 
 **나이 · 사는 지역 · 취업 상태 · 연소득을 넣으면, 수천 건의 청년 지원 정책 가운데 나에게 해당될 수 있는 것만 좁혀 보여 주는 서비스입니다.**
 
-**공개 URL** — http://161.33.139.178:8080/
+**공개 URL** — https://chajaga.com/
 
 > 이 서비스는 자격을 판정하지 않습니다. 후보를 좁혀 줄 뿐이며, 최종 자격과 지원 내용은 각 정책의 신청처에서 확인해야 합니다.
 
@@ -136,7 +136,7 @@ flowchart LR
 매칭 요청 예시:
 
 ```bash
-curl -X POST http://161.33.139.178:8080/api/v1/policies/match \
+curl -X POST https://chajaga.com/api/v1/policies/match \
   -H "Content-Type: application/json" \
   -d '{"age": 25, "sido": "11", "job": "0013003", "income": 3000}'
 ```

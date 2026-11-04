@@ -121,7 +121,7 @@ jobs:
         run: |
           EXPECTED="\"version\":\"${GITHUB_SHA::7}\""
           for _ in $(seq 1 10); do
-            BODY=$(curl -fs http://161.33.139.178:8080/health || true)
+            BODY=$(curl -fs https://chajaga.com/health || true)
             echo "응답: ${BODY}"
             if [[ "$BODY" == *"$EXPECTED"* ]]; then
               echo "공개 URL 확인: ${GITHUB_SHA::7}"
