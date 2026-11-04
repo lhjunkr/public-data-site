@@ -1,0 +1,10 @@
+# chajaga.com 요청을 같은 compose 안의 app 컨테이너 8080으로 넘긴다.
+# 인증서 발급·갱신과 http → https 이동은 Caddy가 자동으로 한다.
+chajaga.com {
+	reverse_proxy app:8080
+}
+
+# www로 들어오면 chajaga.com으로 주소를 바꿔 보낸다.
+www.chajaga.com {
+	redir https://chajaga.com{uri} permanent
+}

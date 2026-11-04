@@ -10,5 +10,26 @@ services:
       YOUTH_API_KEY: ${YOUTH_API_KEY}
       ADMIN_TOKEN: ${ADMIN_TOKEN}
       TZ: Asia/Seoul
+    # 서버 자기 자신(127.0.0.1)에만 연다. 외부 요청은 반드시 caddy를 거친다 (D-025).
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
+
+  # HTTPS 담당. 인증서 발급·갱신, http → https 이동, app으로 전달 (D-025).
+  caddy:
+    image: caddy:2
+    container_name: policy-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # 발급받은 인증서가 저장되는 곳. 지우면 재발급해야 한다.
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+
+volumes:
+  caddy_data:
+  caddy_config:
