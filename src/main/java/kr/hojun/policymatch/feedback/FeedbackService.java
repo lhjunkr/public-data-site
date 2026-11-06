@@ -1,12 +1,13 @@
 package kr.hojun.policymatch.feedback;
 
 import java.util.regex.Pattern;
+import kr.hojun.policymatch.alert.AlertSender;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
- * "의견 보내기" 입력 검증 → 도배 방지 → 저장 (D-024).
+ * "의견 보내기" 입력 검증 → 도배 방지 → 저장 → 알림 (D-024, D-026).
  *
  * 이메일은 선택이고, 적었다면 개인정보 수집 · 이용 동의(consent)가 있어야 받는다(개인정보 보호법 제15조).
  * 동의 화면에 알리는 네 가지(항목 · 목적 · 보관 기간 · 거부 권리)는 index.html 의 안내문에 있다.
@@ -24,10 +25,12 @@ public class FeedbackService {
 
     private final FeedbackStore store;
     private final FeedbackRateLimiter limiter;
+    private final AlertSender alert;
 
-    public FeedbackService(FeedbackStore store, FeedbackRateLimiter limiter) {
+    public FeedbackService(FeedbackStore store, FeedbackRateLimiter limiter, AlertSender alert) {
         this.store = store;
         this.limiter = limiter;
+        this.alert = alert;
     }
 
     /**
@@ -70,6 +73,8 @@ public class FeedbackService {
         }
 
         store.insert(message, email);
+        // 의견 본문 · 이메일은 외부(디스코드)로 보내지 않는다(D-024, D-026). 도착 사실만 알린다.
+        alert.send("[chajaga] 새 의견이 들어왔습니다. 관리 API로 확인하세요.");
         return true;
     }
 

@@ -12,11 +12,12 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import kr.hojun.policymatch.alert.FakeAlertSender;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
-/** 의견 입력 검증 · 동의 · 도배 방지 (D-024). DB 없이 가짜 저장소로 규칙만 본다. */
+/** 의견 입력 검증 · 동의 · 도배 방지 (D-024) · 알림 (D-026). DB 없이 가짜 저장소 · 가짜 알림으로 규칙만 본다. */
 class FeedbackServiceTest {
 
     /** 진짜 DB 대신 받은 것만 기억하는 저장소 */
@@ -40,7 +41,8 @@ class FeedbackServiceTest {
 
     private final FakeStore store = new FakeStore();
     private final MovableClock clock = new MovableClock();
-    private final FeedbackService service = new FeedbackService(store, new FeedbackRateLimiter(clock));
+    private final FakeAlertSender alert = new FakeAlertSender();
+    private final FeedbackService service = new FeedbackService(store, new FeedbackRateLimiter(clock), alert);
 
     private HttpStatus statusOf(FeedbackRequest request, String ip) {
         ResponseStatusException e = assertThrows(ResponseStatusException.class, () -> service.submit(request, ip));
@@ -101,5 +103,22 @@ class FeedbackServiceTest {
     void 하루_상한을_넘으면_429() {
         store.today = FeedbackService.DAILY_LIMIT;
         assertEquals(HttpStatus.TOO_MANY_REQUESTS, statusOf(new FeedbackRequest("의견", null, null, null), "3.3.3.3"));
+    }
+
+    @Test
+    void 저장하면_알림을_1건_보내고_본문과_이메일은_넣지_않는다() {
+        service.submit(new FeedbackRequest("답장 주세요 비밀내용", "me@example.com", true, null), "1.1.1.1");
+
+        assertEquals(1, alert.sent.size());
+        assertFalse(alert.sent.get(0).contains("비밀내용"), "본문은 외부로 보내지 않는다");
+        assertFalse(alert.sent.get(0).contains("me@example.com"), "이메일은 외부로 보내지 않는다");
+    }
+
+    @Test
+    void 저장하지_않은_요청은_알림을_보내지_않는다() {
+        service.submit(new FeedbackRequest("광고", null, null, "http://spam.example"), "1.1.1.1");
+        assertEquals(HttpStatus.BAD_REQUEST, statusOf(new FeedbackRequest("   ", null, null, null), "1.1.1.1"));
+
+        assertEquals(0, alert.sent.size(), "봇 · 입력 오류는 알리지 않는다");
     }
 }
