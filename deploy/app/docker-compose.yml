@@ -9,6 +9,8 @@ services:
       SPRING_DATASOURCE_PASSWORD: ${SPRING_DATASOURCE_PASSWORD}
       YOUTH_API_KEY: ${YOUTH_API_KEY}
       ADMIN_TOKEN: ${ADMIN_TOKEN}
+      # 디스코드 웹훅. .env 에 없으면 빈 값이 되어 알림이 꺼진다 (D-026)
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
       TZ: Asia/Seoul
     # 서버 자기 자신(127.0.0.1)에만 연다. 외부 요청은 반드시 caddy를 거친다 (D-025).
     ports:
