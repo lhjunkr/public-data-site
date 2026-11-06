@@ -16,8 +16,9 @@ services:
       - --innodb-buffer-pool-size=128M
       - --performance-schema=OFF
       - --max-connections=50
+    # 사설 IP 에만 연다. 보안 목록(10.0.0.0/16)과 함께 두 겹으로 막는다 (D-026, 9/15 의도와 맞춤)
     ports:
-      - "3306:3306"
+      - "10.0.0.190:3306:3306"
     volumes:
       - mysql-data:/var/lib/mysql
     healthcheck:
