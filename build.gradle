@@ -34,4 +34,6 @@ tasks.named('test') {
 	// 테스트 중에는 예약 작업(매일 갱신 D-020 · 이메일 정리 D-024)을 끈다. 테스트가 그 시각에 돌아도 실제로 실행되지 않게 한다.
 	systemProperty 'batch.daily-cron', '-'
 	systemProperty 'feedback.purge-cron', '-'
+	// 테스트는 디스코드로 알림을 보내지 않는다(D-026). 맥의 .env 에 URL 이 있어도 이 빈 값이 이긴다.
+	systemProperty 'alert.webhook-url', ''
 }
