@@ -26,10 +26,11 @@ done
 # curl 의 시각은 모두 "요청 시작부터 그 순간까지" 누적이라, 앞 시각을 빼서 구간을 만든다.
 #   열: 코드 DNS TCP TLS SERVER TRANSFER TOTAL 크기
 #   http 라면 TLS 가 없어 time_appconnect 가 0 이므로 TLS = 0, 연결 준비 완료 = TCP 연결 완료.
+#   소수 6자리로 고정해 찍는다. 그냥 print 하면 0.0001 미만이 6e-05 처럼 찍히고 sort -n 이 이를 6 으로 읽어 순서가 틀어진다.
 SEG=$(awk '{
   ready = ($4 > 0) ? $4 : $3
   tls   = ($4 > 0) ? $4 - $3 : 0
-  print $1, $2, $3 - $2, tls, $5 - ready, $6 - $5, $6, $7
+  printf "%s %.6f %.6f %.6f %.6f %.6f %.6f %s\n", $1, $2, $3 - $2, tls, $5 - ready, $6 - $5, $6, $7
 }' "$RAW")
 
 # 열 하나를 작은 순으로 정렬해 순위 방식으로 고른다: p50 = ceil(n×0.5)번째, p95 = ceil(n×0.95)번째.
