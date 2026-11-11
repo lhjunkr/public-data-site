@@ -268,6 +268,11 @@ class PolicyMatchRepositoryTest {
         for (String code : regionCodes) {
             jdbc.update("INSERT INTO policy_region (policy_id, region_code) VALUES (?, ?)", id, code);
         }
+        // D-027: 매칭은 policy_sido 를 본다. 정규화와 같은 규칙(코드 앞 두 자리)으로 채운다
+        jdbc.update("""
+                INSERT INTO policy_sido (policy_id, sido)
+                SELECT DISTINCT policy_id, LEFT(region_code, 2) FROM policy_region WHERE policy_id = ?
+                """, id);
         // D-018: 결과에 나오려면 열린 탭의 칩이 하나는 있어야 한다. 기본은 주거 > 전월세
         setChips(no, "housing.rent");
     }

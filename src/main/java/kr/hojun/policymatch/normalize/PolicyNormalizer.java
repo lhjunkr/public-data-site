@@ -23,7 +23,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * policy_raw 에 쌓인 원본을 정규화 표(policy / policy_region / policy_job / policy_category)로 옮긴다.
+ * policy_raw 에 쌓인 원본을 정규화 표(policy / policy_region / policy_sido / policy_job / policy_category)로 옮긴다.
  *
  * 멱등성 설계
  *  - policy 는 policy_no 가 UNIQUE 이므로 ON DUPLICATE KEY UPDATE 로 덮어쓴다.
@@ -144,6 +144,14 @@ public class PolicyNormalizer {
                         syncLinks("policy_region", "region_code", policyId, regionCodes),
                         syncLinks("policy_job", "job_code", policyId, split(text(n, "jobCd"))),
                         syncLinks("policy_category", "category_code", policyId, chips) };
+
+                // D-027: 매칭은 시도 단위로만 지역을 본다. policy_region 과 같은 처리 안에서 시도로 줄여 함께 맞춘다.
+                // 둘 중 하나가 실패하면 이 정책은 실패 목록에 들어가 비활성이 되므로, 어긋난 채로 결과에 나오지 않는다.
+                Set<String> sidos = new HashSet<>();
+                for (String code : regionCodes) {
+                    sidos.add(sidoOf(code));
+                }
+                syncLinks("policy_sido", "sido", policyId, sidos);
             } catch (DataAccessException e) {
                 failedNos.add(policyNo);
                 log.warn("정책 {} 정규화 실패 — 건너뜀: {}", policyNo, e.getMostSpecificCause().getMessage());
@@ -263,12 +271,12 @@ public class PolicyNormalizer {
             return;
         }
         insertRows("INSERT IGNORE INTO region (code, sido, name) VALUES ", "(?, ?, ?)", newCodes,
-                code -> new Object[] { code, code.length() >= 2 ? code.substring(0, 2) : code, code });
+                code -> new Object[] { code, sidoOf(code), code });
         knownRegions.addAll(newCodes);
     }
 
     /**
-     * 한 정책의 연결 표(policy_region / policy_job / policy_category)를 values 와 같게 맞추고 연결 수를 돌려준다.
+     * 한 정책의 연결 표(policy_region / policy_sido / policy_job / policy_category)를 values 와 같게 맞추고 연결 수를 돌려준다.
      * 이미 같으면 아무것도 쓰지 않는다. table · column 은 이 클래스 안의 상수만 넘긴다(사용자 입력이 아니다).
      */
     private int syncLinks(String table, String column, long policyId, Set<String> values) {
@@ -293,6 +301,11 @@ public class PolicyNormalizer {
         }
         String sql = head + String.join(", ", Collections.nCopies(items.size(), rowPlaceholder));
         jdbc.update(sql, args.toArray());
+    }
+
+    /** 시도 = 지역 코드 앞 두 자리. region.sido 와 policy_sido 가 같은 규칙을 쓰도록 한 곳에 둔다(D-027). */
+    static String sidoOf(String regionCode) {
+        return regionCode.length() >= 2 ? regionCode.substring(0, 2) : regionCode;
     }
 
     /** 콤마 다중값을 쪼갠다. 같은 값이 두 번 오는 경우가 실제로 있어 집합으로 받는다. */
