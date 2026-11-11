@@ -144,6 +144,26 @@ class PolicyNormalizerTest {
         assertEquals(id, idOf("T-N-IN"));
     }
 
+    // ---------- 지역 (D-027) ----------
+
+    @Test
+    void 지역_코드를_시도로_줄여_한_번씩_저장한다() {
+        normalizer.normalize();
+
+        // setUp 의 지역은 99001,99002 — 같은 시도 두 코드가 "99" 한 행이 된다
+        assertEquals(List.of("99"), sidos("T-N-IN"));
+    }
+
+    @Test
+    void 지역이_바뀌면_시도도_같이_바뀐다() {
+        normalizer.normalize();
+        jdbc.update("UPDATE policy_raw SET raw_json = JSON_SET(raw_json, '$.zipCd', '98001') WHERE policy_no = 'T-N-IN'");
+
+        normalizer.normalize();
+
+        assertEquals(List.of("98"), sidos("T-N-IN"), "예전 시도(99)가 남으면 다른 지역 사용자에게 잘못 보인다");
+    }
+
     // ---------- 멱등성 · 안전장치 ----------
 
     @Test
@@ -262,6 +282,13 @@ class PolicyNormalizerTest {
                 """, String.class, no);
     }
 
+    private List<String> sidos(String no) {
+        return jdbc.queryForList("""
+                SELECT ps.sido FROM policy_sido ps JOIN policy p ON p.id = ps.policy_id
+                WHERE p.policy_no = ? ORDER BY ps.sido
+                """, String.class, no);
+    }
+
     private long idOf(String no) {
         return jdbc.queryForObject("SELECT id FROM policy WHERE policy_no = ?", Long.class, no);
     }
@@ -270,6 +297,7 @@ class PolicyNormalizerTest {
         return jdbc.queryForList("""
                 SELECT p.policy_no, p.id, p.active, p.updated_at,
                        (SELECT COUNT(*) FROM policy_region pr WHERE pr.policy_id = p.id) AS regions,
+                       (SELECT COUNT(*) FROM policy_sido ps WHERE ps.policy_id = p.id) AS sidos,
                        (SELECT COUNT(*) FROM policy_job pj WHERE pj.policy_id = p.id) AS jobs,
                        (SELECT COUNT(*) FROM policy_category pc WHERE pc.policy_id = p.id) AS categories
                 FROM policy p

@@ -26,6 +26,9 @@ import org.springframework.stereotype.Repository;
  *  - 상한 이하인데 하한이 있으면(> 0) 판단불가. 하한 칸에 다른 대상의 기준이 들어간 사례가 있다
  *    (예: 청년 4,000 / 신혼부부 6,000). 상한을 넘는 경우는 어느 해석으로도 미충족이라 그대로 둔다.
  *
+ * 지역 (D-027) — 시도 단위 표(policy_sido)만 본다. 시군구 단위 policy_region 과 region 을 조인하면
+ *  정책 × 그 시도의 지역 코드 수만큼 확인해 느렸다(11/18 · 11/21 측정, docs/performance.md).
+ *
  * 분류 (D-018) — 열린 탭의 칩(:openChips)을 하나라도 가진 정책만 낸다.
  *  - 닫힌 탭(일자리)의 칩만 가진 정책과 분류가 없는 정책은 결과에 나오지 않는다.
  *  - 결과마다 열린 칩 코드 목록(categories)을 붙인다. 화면은 이것으로 탭·칩별 건수를 센다.
@@ -58,9 +61,8 @@ public class PolicyMatchRepository {
                     OR (p.max_age > 0 AND p.min_age > p.max_age) )
               AND ( p.apply_end_date IS NULL OR p.apply_end_date >= CURDATE() )
               AND EXISTS (
-                    SELECT 1 FROM policy_region pr
-                    JOIN region r ON r.code = pr.region_code
-                    WHERE pr.policy_id = p.id AND r.sido = :sido )
+                    SELECT 1 FROM policy_sido ps
+                    WHERE ps.policy_id = p.id AND ps.sido = :sido )
               AND EXISTS (
                     SELECT 1 FROM policy_category pc
                     WHERE pc.policy_id = p.id AND pc.category_code IN (:openChips) )

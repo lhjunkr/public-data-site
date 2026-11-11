@@ -27,9 +27,8 @@ WHERE p.active = TRUE
         OR (p.max_age > 0 AND p.min_age > p.max_age) )
   AND ( p.apply_end_date IS NULL OR p.apply_end_date >= CURDATE() )
   AND EXISTS (
-        SELECT 1 FROM policy_region pr
-        JOIN region r ON r.code = pr.region_code
-        WHERE pr.policy_id = p.id AND r.sido = @sido )
+        SELECT 1 FROM policy_sido ps
+        WHERE ps.policy_id = p.id AND ps.sido = @sido )
   AND EXISTS (
         SELECT 1 FROM policy_category pc
         WHERE pc.policy_id = p.id AND pc.category_code IN (

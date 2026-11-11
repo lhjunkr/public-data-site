@@ -44,6 +44,10 @@ class PolicyMatchApiIntegrationTest {
                 SELECT id, '99001' FROM policy WHERE policy_no = 'T-API'
                 """);
         jdbc.update("""
+                INSERT INTO policy_sido (policy_id, sido)
+                SELECT id, '99' FROM policy WHERE policy_no = 'T-API'
+                """);
+        jdbc.update("""
                 INSERT INTO policy_category (policy_id, category_code)
                 SELECT id, 'housing.rent' FROM policy WHERE policy_no = 'T-API'
                 """);
