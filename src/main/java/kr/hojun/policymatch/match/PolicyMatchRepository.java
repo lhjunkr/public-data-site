@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import kr.hojun.policymatch.category.CategoryCatalog;
 import org.springframework.jdbc.core.RowCallbackHandler;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -37,14 +38,19 @@ import org.springframework.stereotype.Repository;
  *  - :job 이 없으면(null) 거르지 않는다.
  *  - 있으면 정책 코드에 제한없음(0013010)이나 고른 코드가 하나라도 있는 정책만 낸다.
  *  - 10/30 측정: 코드가 없는 정책 0건, 제한없음과 다른 코드가 함께 붙은 정책 0건 → 따로 다룰 경우가 없다.
+ *
+ * 긴 글 (D-027) — support_content · extra_qualification 은 목록에서 읽지 않는다.
+ *  - 지원 내용은 상세 조회(findDetail)로 정책 하나씩만 내준다.
+ *  - 확인 필요(needsCheck)는 SQL 에서 참/거짓(1/0)으로 계산한다.
  */
 @Repository
 public class PolicyMatchRepository {
 
     private static final String MATCH_SQL = """
             SELECT p.id, p.title, p.category_large, p.category_medium,
-                   p.support_content, p.apply_period_text, p.apply_url, p.ref_url,
-                   p.earn_cnd_se_cd, p.earn_etc_cn, p.extra_qualification,
+                   p.apply_period_text, p.apply_url, p.ref_url,
+                   p.earn_cnd_se_cd, p.earn_etc_cn,
+                   (p.extra_qualification IS NOT NULL AND TRIM(p.extra_qualification) <> '') AS needs_check,
                    CASE
                      WHEN p.earn_cnd_se_cd = '0043001'                              THEN 'MET'
                      WHEN p.earn_cnd_se_cd IS NULL OR p.earn_cnd_se_cd <> '0043002' THEN 'UNKNOWN'
@@ -81,6 +87,13 @@ public class PolicyMatchRepository {
             ORDER BY policy_id, category_code
             """;
 
+    /** 상세 조회 (D-027). 비활성 정책은 목록처럼 상세로도 내주지 않는다(D-014). */
+    private static final String DETAIL_SQL = """
+            SELECT id, title, support_content
+            FROM policy
+            WHERE id = :id AND active = TRUE
+            """;
+
     private final NamedParameterJdbcTemplate jdbc;
     private final CategoryCatalog catalog;
 
@@ -101,19 +114,17 @@ public class PolicyMatchRepository {
         List<MatchedPolicy> policies = jdbc.query(MATCH_SQL, params, (rs, rowNum) -> {
             IncomeStatus status = IncomeStatus.valueOf(rs.getString("income_status"));
             String earnEtc = rs.getString("earn_etc_cn");
-            String extra = rs.getString("extra_qualification");
             return new MatchedPolicy(
                     rs.getLong("id"),
                     rs.getString("title"),
                     rs.getString("category_large"),
                     rs.getString("category_medium"),
-                    rs.getString("support_content"),
                     rs.getString("apply_period_text"),
                     rs.getString("apply_url"),
                     rs.getString("ref_url"),
                     status,
                     "0043003".equals(rs.getString("earn_cnd_se_cd")) ? earnEtc : null,
-                    extra != null && !extra.isBlank(),
+                    rs.getBoolean("needs_check"),
                     List.of());
         });
         if (policies.isEmpty()) {
@@ -131,6 +142,16 @@ public class PolicyMatchRepository {
         return policies.stream()
                 .map(p -> p.withCategories(chipsById.getOrDefault(p.id(), List.of())))
                 .toList();
+    }
+
+    /** 없거나 비활성이면 빈 Optional. queryForObject 는 0건이면 예외(→ 500)라 쓰지 않는다. */
+    public Optional<PolicyDetail> findDetail(long id) {
+        return jdbc.query(DETAIL_SQL, new MapSqlParameterSource("id", id), (rs, rowNum) -> new PolicyDetail(
+                        rs.getLong("id"),
+                        rs.getString("title"),
+                        rs.getString("support_content")))
+                .stream()
+                .findFirst();
     }
 
     /** 존재하지 않는 시도 코드(예: 통합 전 옛 코드 "46")를 조용한 빈 결과 대신 400 으로 돌려보내기 위해 쓴다. */
