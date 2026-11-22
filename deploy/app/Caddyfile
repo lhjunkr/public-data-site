@@ -1,6 +1,9 @@
 # chajaga.com 요청을 같은 compose 안의 app 컨테이너 8080으로 넘긴다.
 # 인증서 발급·갱신과 http → https 이동은 Caddy가 자동으로 한다.
 chajaga.com {
+	# 응답 압축 (D-027 ③). 브라우저가 Accept-Encoding 으로 gzip 을 받겠다고 할 때만 압축한다.
+	# 매칭 응답 160KB → 약 24KB. 압축 계산은 앱 서버 CPU 를 쓰는데, 부하 중에도 대부분 쉬고 있다(11/22 측정).
+	encode gzip
 	reverse_proxy app:8080
 }
 
