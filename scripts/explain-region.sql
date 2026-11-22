@@ -165,3 +165,41 @@ WHERE p.active = TRUE
         SELECT 1 FROM policy_job pj
         WHERE pj.policy_id = p.id AND pj.job_code IN ('0013010', @job) ) )
 ORDER BY p.view_count DESC, p.id;
+
+-- [E] 배포된 실제 policy_sido (V9, 11/23 계획분). [A] 와 같은 데이터에서 시간 · 결과 건수를 비교한다.
+SELECT '[E] sido table (real, V9)';
+EXPLAIN ANALYZE
+SELECT p.id, p.title, p.category_large, p.category_medium,
+       p.support_content, p.apply_period_text, p.apply_url, p.ref_url,
+       p.earn_cnd_se_cd, p.earn_etc_cn, p.extra_qualification,
+       CASE
+         WHEN p.earn_cnd_se_cd = '0043001'                              THEN 'MET'
+         WHEN p.earn_cnd_se_cd IS NULL OR p.earn_cnd_se_cd <> '0043002' THEN 'UNKNOWN'
+         WHEN COALESCE(p.earn_max_amt, 0) = 0                           THEN 'UNKNOWN'
+         WHEN @income IS NULL                                           THEN 'UNKNOWN'
+         WHEN @income > p.earn_max_amt                                  THEN 'NOT_MET'
+         WHEN COALESCE(p.earn_min_amt, 0) > 0                           THEN 'UNKNOWN'
+         ELSE                                                                'MET'
+       END AS income_status
+FROM policy p
+WHERE p.active = TRUE
+  AND ( ( (p.min_age IS NULL OR p.min_age = 0 OR p.min_age <= @age)
+          AND (p.max_age IS NULL OR p.max_age = 0 OR @age <= p.max_age) )
+        OR (p.max_age > 0 AND p.min_age > p.max_age) )
+  AND ( p.apply_end_date IS NULL OR p.apply_end_date >= CURDATE() )
+  AND EXISTS (
+        SELECT 1 FROM policy_sido ps
+        WHERE ps.policy_id = p.id AND ps.sido = @sido )
+  AND EXISTS (
+        SELECT 1 FROM policy_category pc
+        WHERE pc.policy_id = p.id AND pc.category_code IN (
+          'housing.rent', 'housing.house',
+          'welfare.living', 'welfare.health', 'welfare.culture',
+          'education.tuition', 'education.skills',
+          'participation.youth', 'participation.exchange',
+          'jobs.employment', 'jobs.startup', 'jobs.worker') )
+  AND ( @job IS NULL
+        OR EXISTS (
+            SELECT 1 FROM policy_job pj
+            WHERE pj.policy_id = p.id AND pj.job_code IN ('0013010', @job) ) )
+ORDER BY p.view_count DESC, p.id;
