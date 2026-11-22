@@ -29,6 +29,12 @@ public class PolicyMatchService {
         return new MatchResponse(policies.size(), policies);
     }
 
+    /** 정책 하나의 상세 (D-027). 없거나 비활성이면 404 */
+    public PolicyDetail detail(long id) {
+        return repository.findDetail(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "정책을 찾을 수 없습니다: " + id));
+    }
+
     void validate(MatchRequest request) {
         if (request == null) {
             throw badRequest("요청 본문이 비어 있습니다.");

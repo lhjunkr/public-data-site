@@ -66,7 +66,8 @@ class PolicyMatchApiIntegrationTest {
                 .andExpect(jsonPath("$.count").value(1))
                 .andExpect(jsonPath("$.policies[0].title").value("T-API"))
                 .andExpect(jsonPath("$.policies[0].incomeStatus").value("NOT_MET"))
-                .andExpect(jsonPath("$.policies[0].categories[0]").value("housing.rent"));
+                .andExpect(jsonPath("$.policies[0].categories[0]").value("housing.rent"))
+                .andExpect(jsonPath("$.policies[0].supportContent").doesNotExist());
     }
 
     @Test
@@ -101,5 +102,31 @@ class PolicyMatchApiIntegrationTest {
                         .content("{\"sido\":\"99\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("age 는 필수입니다."));
+    }
+
+
+    @Test
+    void 상세_조회는_200과_지원_내용을_돌려준다() throws Exception {
+        jdbc.update("UPDATE policy SET support_content = '월 20만 원 지원' WHERE policy_no = 'T-API'");
+        Long id = jdbc.queryForObject("SELECT id FROM policy WHERE policy_no = 'T-API'", Long.class);
+
+        mvc.perform(get("/api/v1/policies/{id}", id))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.title").value("T-API"))
+                .andExpect(jsonPath("$.supportContent").value("월 20만 원 지원"));
+    }
+
+    @Test
+    void 없는_정책은_404와_사유를_돌려준다() throws Exception {
+        mvc.perform(get("/api/v1/policies/0"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("정책을 찾을 수 없습니다: 0"));
+    }
+
+    @Test
+    void id가_숫자가_아니면_400과_사유를_돌려준다() throws Exception {
+        mvc.perform(get("/api/v1/policies/abc"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("정책 id 는 숫자여야 합니다."));
     }
 }

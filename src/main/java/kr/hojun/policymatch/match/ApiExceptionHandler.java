@@ -6,6 +6,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
@@ -15,7 +16,7 @@ import org.springframework.web.server.ResponseStatusException;
 @RestControllerAdvice(assignableTypes = PolicyMatchController.class)
 public class ApiExceptionHandler {
 
-    /** 서비스의 입력 검증 실패 (age 누락, 없는 시도 코드 등) */
+    /** 서비스의 입력 검증 실패 (age 누락, 없는 시도 코드 등) · 없는 정책 (404) */
     @ExceptionHandler(ResponseStatusException.class)
     public ResponseEntity<ApiErrorResponse> handleStatus(ResponseStatusException e) {
         return body(e.getStatusCode(), e.getReason());
@@ -26,6 +27,12 @@ public class ApiExceptionHandler {
     public ResponseEntity<ApiErrorResponse> handleUnreadable(HttpMessageNotReadableException e) {
         return body(HttpStatus.BAD_REQUEST,
                 "요청 JSON 형식이 올바르지 않습니다. age·income 은 숫자, sido 는 문자열이어야 합니다.");
+    }
+
+    /** 경로의 id 가 숫자가 아님 (예: /api/v1/policies/abc) */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ApiErrorResponse> handleTypeMismatch(MethodArgumentTypeMismatchException e) {
+        return body(HttpStatus.BAD_REQUEST, "정책 id 는 숫자여야 합니다.");
     }
 
     private static ResponseEntity<ApiErrorResponse> body(HttpStatusCode code, String message) {

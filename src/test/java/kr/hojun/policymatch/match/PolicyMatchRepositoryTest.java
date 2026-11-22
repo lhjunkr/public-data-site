@@ -152,6 +152,30 @@ class PolicyMatchRepositoryTest {
         assertNotNull(find("T-INCOME-ETC", null).incomeNote());
     }
 
+    // ---------- 확인 필요 (D-003 · D-027: SQL 에서 계산) ----------
+
+    @Test
+    void 추가_자격_원문이_있으면_확인_필요() {
+        insert("T-EXTRA", "Y", 0, 0, "0043001", 0L, 0L, null, "99001");
+        jdbc.update("UPDATE policy SET extra_qualification = '거주 기간 1년 이상' WHERE policy_no = 'T-EXTRA'");
+
+        assertTrue(find("T-EXTRA", null).needsCheck());
+    }
+
+    @Test
+    void 추가_자격_원문이_없으면_확인_불필요() {
+        // insert 도우미는 extra_qualification 을 넣지 않는다 → NULL
+        assertFalse(find("T-NO-AGE-LIMIT", null).needsCheck());
+    }
+
+    @Test
+    void 추가_자격_원문이_공백뿐이면_확인_불필요() {
+        insert("T-EXTRA-BLANK", "Y", 0, 0, "0043001", 0L, 0L, null, "99001");
+        jdbc.update("UPDATE policy SET extra_qualification = '   ' WHERE policy_no = 'T-EXTRA-BLANK'");
+
+        assertFalse(find("T-EXTRA-BLANK", null).needsCheck());
+    }
+
     // ---------- 지역 ----------
 
     @Test
@@ -251,6 +275,32 @@ class PolicyMatchRepositoryTest {
         assertFalse(titlesFor("0013001").contains("T-JOB-MULTI"), "재직자");
     }
 
+    // ---------- 상세 조회 (D-027) ----------
+
+    @Test
+    void 상세_조회는_지원_내용을_준다() {
+        insert("T-DETAIL", "Y", 0, 0, "0043001", 0L, 0L, null, "99001");
+        jdbc.update("UPDATE policy SET support_content = '월 20만 원 지원' WHERE policy_no = 'T-DETAIL'");
+
+        PolicyDetail detail = repository.findDetail(idOf("T-DETAIL")).orElseThrow();
+        assertEquals("T-DETAIL", detail.title());
+        assertEquals("월 20만 원 지원", detail.supportContent());
+    }
+
+    @Test
+    void 비활성_정책은_상세_조회에도_나오지_않는다() {
+        insert("T-DETAIL-OFF", "Y", 0, 0, "0043001", 0L, 0L, null, "99001");
+        jdbc.update("UPDATE policy SET active = FALSE WHERE policy_no = 'T-DETAIL-OFF'");
+
+        assertTrue(repository.findDetail(idOf("T-DETAIL-OFF")).isEmpty());
+    }
+
+    @Test
+    void 없는_id는_빈_결과() {
+        // id 는 1 부터 자동으로 늘어나므로 0 번 정책은 없다
+        assertTrue(repository.findDetail(0).isEmpty());
+    }
+
     // ---------- 도우미 ----------
 
     private void insert(String no, String ageLimitYn, Integer minAge, Integer maxAge,
@@ -315,5 +365,10 @@ class PolicyMatchRepositoryTest {
 
     private IncomeStatus statusOf(String title, Long income) {
         return find(title, income).incomeStatus();
+    }
+
+
+    private long idOf(String no) {
+        return jdbc.queryForObject("SELECT id FROM policy WHERE policy_no = ?", Long.class, no);
     }
 }
