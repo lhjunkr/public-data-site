@@ -12,6 +12,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.context.WebApplicationContext;
@@ -128,5 +129,30 @@ class PolicyMatchApiIntegrationTest {
         mvc.perform(get("/api/v1/policies/abc"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("정책 id 는 숫자여야 합니다."));
+    }
+
+    @Test
+    void 상세_조회는_IP마다_1분에_30번까지_넘으면_429() throws Exception {
+        Long id = jdbc.queryForObject("SELECT id FROM policy WHERE policy_no = 'T-API'", Long.class);
+
+        for (int i = 0; i < PolicyDetailRateLimiter.MAX_PER_WINDOW; i++) {
+            mvc.perform(get("/api/v1/policies/{id}", id).with(fromIp("203.0.113.50")))
+                    .andExpect(status().isOk());
+        }
+        mvc.perform(get("/api/v1/policies/{id}", id).with(fromIp("203.0.113.50")))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.message").value("잠시 후 다시 시도해 주세요. 정책 상세는 1분에 30번까지 볼 수 있습니다."));
+
+        // 다른 사용자(IP)는 영향을 받지 않는다
+        mvc.perform(get("/api/v1/policies/{id}", id).with(fromIp("203.0.113.60")))
+                .andExpect(status().isOk());
+    }
+
+    /** 요청의 접속 주소를 바꾼다. 기본값 127.0.0.1 을 쓰는 다른 테스트와 횟수가 섞이지 않게 한다 */
+    private static RequestPostProcessor fromIp(String ip) {
+        return request -> {
+            request.setRemoteAddr(ip);
+            return request;
+        };
     }
 }

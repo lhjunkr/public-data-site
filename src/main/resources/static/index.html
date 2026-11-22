@@ -637,22 +637,48 @@
       li.appendChild(links);
     }
 
-    // 지원 내용 (접기)
-    if (policy.supportContent != null) {
-      const details = document.createElement("details");
-      const summary = document.createElement("summary");
-      summary.textContent = "지원 내용 보기";
-      details.appendChild(summary);
+    // 지원 내용 (접기) — 목록 응답에는 없다. 처음 펼칠 때 상세 조회로 받아 온다 (D-027)
+    const details = document.createElement("details");
+    const summary = document.createElement("summary");
+    summary.textContent = "지원 내용 보기";
+    details.appendChild(summary);
 
-      const content = document.createElement("div");
-      content.className = "support-content";
-      content.textContent = cleanSupportContent(policy.supportContent);
-      details.appendChild(content);
+    const content = document.createElement("div");
+    content.className = "support-content";
+    details.appendChild(content);
 
-      li.appendChild(details);
-    }
+    let loaded = false;   // 한 번 받아 오면 다시 펼쳐도 요청하지 않는다. 실패했으면 다음에 펼칠 때 다시 시도
+    details.addEventListener("toggle", function () {
+      if (!details.open || loaded) return;
+      loaded = true;
+      loadSupportContent(policy.id, content).then(function (ok) {
+        if (!ok) loaded = false;
+      });
+    });
+    li.appendChild(details);
 
     return li;
+  }
+
+  // GET /api/v1/policies/{id} 로 지원 내용을 받아 box 에 채운다. 성공하면 true
+  // 오류(없는 정책 404 · 요청 제한 429)는 서버가 보낸 message 를 그대로 보여 준다
+  async function loadSupportContent(id, box) {
+    box.textContent = "불러오는 중...";
+    try {
+      const response = await fetch("/api/v1/policies/" + encodeURIComponent(id));
+      const data = await response.json().catch(function () { return null; });
+      if (!response.ok) {
+        box.textContent = data && data.message ? data.message : "지원 내용을 불러오지 못했습니다.";
+        return false;
+      }
+      box.textContent = data && data.supportContent
+        ? cleanSupportContent(data.supportContent)
+        : "등록된 지원 내용이 없습니다. 참고 링크에서 확인하세요.";
+      return true;
+    } catch (e) {
+      box.textContent = "서버에 연결할 수 없습니다. 접었다가 다시 펼쳐 보세요.";
+      return false;
+    }
   }
 
   // ---- 결과 렌더링 ---------------------------------------------------------
