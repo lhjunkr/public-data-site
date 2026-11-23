@@ -27,6 +27,7 @@ class PolicyMatchApiIntegrationTest {
 
     @Autowired WebApplicationContext context;
     @Autowired JdbcTemplate jdbc;
+    @Autowired MatchRateLimiter matchLimiter;
 
     MockMvc mvc;
 
@@ -145,6 +146,28 @@ class PolicyMatchApiIntegrationTest {
 
         // 다른 사용자(IP)는 영향을 받지 않는다
         mvc.perform(get("/api/v1/policies/{id}", id).with(fromIp("203.0.113.60")))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void 검색은_IP마다_1분에_정해진_횟수까지_넘으면_429() throws Exception {
+        int max = matchLimiter.maxPerWindow();
+        for (int i = 0; i < max; i++) {
+            mvc.perform(post("/api/v1/policies/match").with(fromIp("203.0.113.70"))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"age\":25,\"sido\":\"99\"}"))
+                    .andExpect(status().isOk());
+        }
+        mvc.perform(post("/api/v1/policies/match").with(fromIp("203.0.113.70"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"age\":25,\"sido\":\"99\"}"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.message").value("잠시 후 다시 시도해 주세요. 검색은 1분에 " + max + "번까지 할 수 있습니다."));
+
+        // 다른 사용자(IP)는 영향을 받지 않는다
+        mvc.perform(post("/api/v1/policies/match").with(fromIp("203.0.113.80"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"age\":25,\"sido\":\"99\"}"))
                 .andExpect(status().isOk());
     }
 

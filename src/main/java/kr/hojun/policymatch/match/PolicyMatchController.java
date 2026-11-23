@@ -16,14 +16,27 @@ public class PolicyMatchController {
 
     private final PolicyMatchService service;
     private final PolicyDetailRateLimiter detailLimiter;
+    private final MatchRateLimiter matchLimiter;
 
-    public PolicyMatchController(PolicyMatchService service, PolicyDetailRateLimiter detailLimiter) {
+    public PolicyMatchController(PolicyMatchService service,
+                                 PolicyDetailRateLimiter detailLimiter,
+                                 MatchRateLimiter matchLimiter) {
         this.service = service;
         this.detailLimiter = detailLimiter;
+        this.matchLimiter = matchLimiter;
     }
 
+    /**
+     * 조건에 맞는 정책 목록. IP 마다 1분에 정해진 횟수까지만 받는다(MatchRateLimiter, 12/3).
+     * 한도를 넘으면 SQL 을 실행하기 전에 429 로 끊어 DB 를 아낀다.
+     */
     @PostMapping("/match")
-    public MatchResponse match(@RequestBody MatchRequest request) {
+    public MatchResponse match(@RequestBody MatchRequest request, HttpServletRequest http) {
+        if (!matchLimiter.tryAcquire(http.getRemoteAddr())) {
+            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
+                    "잠시 후 다시 시도해 주세요. 검색은 1분에 "
+                            + matchLimiter.maxPerWindow() + "번까지 할 수 있습니다.");
+        }
         return service.match(request);
     }
 
