@@ -1,13 +1,90 @@
 # chajaga.com 요청을 같은 compose 안의 app 컨테이너 8080으로 넘긴다.
 # 인증서 발급·갱신과 http → https 이동은 Caddy가 자동으로 한다.
+
+# 보안 헤더 (12/2). 정상 응답 · 오류 응답 · www 이동 모두에 붙인다.
+# 오류 응답(handle_errors)은 본 경로와 따로 처리되므로 거기서도 다시 불러야 한다.
+(security_headers) {
+	header {
+		# HSTS: 앞으로 1년 동안 이 도메인은 https 로만 접속하라고 브라우저에 알린다.
+		# 첫 접속 뒤에는 누가 http 로 유도해도 브라우저가 알아서 https 로 바꾼다.
+		Strict-Transport-Security "max-age=31536000"
+		# 브라우저가 Content-Type 을 추측하지 않게 한다 (글자 파일을 스크립트로 실행하는 공격 차단)
+		X-Content-Type-Options "nosniff"
+		# 다른 사이트가 우리 화면을 iframe 안에 넣지 못하게 한다 (투명 버튼을 겹치는 클릭재킹 방지)
+		# 앞의 것은 옛 브라우저용, 뒤의 것(CSP frame-ancestors)이 표준이다.
+		# CSP 전체 규칙은 index.html 의 인라인 스크립트 때문에 지금은 걸지 않는다.
+		X-Frame-Options "DENY"
+		Content-Security-Policy "frame-ancestors 'none'"
+		# 신청처 같은 다른 사이트로 넘어갈 때 주소 전체(검색 조건 포함) 대신 도메인만 넘긴다
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# 서버 프로그램 이름(Caddy)을 숨긴다
+		-Server
+		# 응답을 내보내는 순간에 적용해 앱이 보낸 같은 이름의 헤더도 덮어쓴다
+		defer
+	}
+}
+
 chajaga.com {
+	import security_headers
+
 	# 응답 압축 (D-027 ③). 브라우저가 Accept-Encoding 으로 gzip 을 받겠다고 할 때만 압축한다.
 	# 매칭 응답 160KB → 약 24KB. 압축 계산은 앱 서버 CPU 를 쓰는데, 부하 중에도 대부분 쉬고 있다(11/22 측정).
 	encode gzip
 	reverse_proxy app:8080
+
+	# 배포 · 재시작 중(약 50초)에는 Caddy 가 앱에 닿지 못해 502 가 난다 (D-026 대가).
+	# 그때 빈 오류 화면 대신 점검 안내를 503(잠시 쓸 수 없음) + Retry-After 로 돌려준다.
+	# 앱이 직접 보낸 503(/health DOWN 등)은 오류가 아니라 정상 응답이라 여기로 오지 않는다.
+	handle_errors {
+		import security_headers
+
+		@app_down expression `{err.status_code} >= 502 && {err.status_code} <= 504`
+		handle @app_down {
+			header Retry-After "60"
+			header Cache-Control "no-store"
+
+			# 화면의 fetch 는 JSON 의 message 를 그대로 보여 주므로 API 는 같은 형식으로 답한다
+			@api path /api/*
+			handle @api {
+				header Content-Type "application/json; charset=utf-8"
+				respond `{"message":"서비스 점검 중입니다. 1분 뒤 다시 시도해 주세요."}` 503
+			}
+
+			handle {
+				header Content-Type "text/html; charset=utf-8"
+				respond <<HTML
+					<!DOCTYPE html>
+					<html lang="ko">
+					<head>
+					<meta charset="utf-8">
+					<meta name="viewport" content="width=device-width, initial-scale=1">
+					<meta http-equiv="refresh" content="30">
+					<title>점검 중 · 찾아가</title>
+					<style>
+					body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+					       font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+					       background: #f6f7f9; color: #222; }
+					main { max-width: 420px; padding: 32px 24px; text-align: center; }
+					h1 { font-size: 22px; margin: 0 0 12px; }
+					p { font-size: 15px; line-height: 1.6; color: #555; margin: 0 0 8px; }
+					</style>
+					</head>
+					<body>
+					<main>
+					<h1>잠시 점검 중입니다</h1>
+					<p>새 버전을 반영하고 있어요. 보통 1분 안에 끝납니다.</p>
+					<p>이 화면은 30초마다 자동으로 다시 시도합니다.</p>
+					</main>
+					</body>
+					</html>
+					HTML 503
+			}
+		}
+	}
 }
 
 # www로 들어오면 chajaga.com으로 주소를 바꿔 보낸다.
 www.chajaga.com {
+	import security_headers
 	redir https://chajaga.com{uri} permanent
 }
