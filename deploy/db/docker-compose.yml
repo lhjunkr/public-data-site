@@ -21,8 +21,14 @@ services:
       - "10.0.0.190:3306:3306"
     volumes:
       - mysql-data:/var/lib/mysql
+      # 컨테이너 안 MySQL 클라이언트(mysqldump · mysql · mysqladmin)가 읽는 접속 정보 (12/4).
+      # 비밀번호를 명령줄(-p)에 쓰면 ps 로 보이고 매번 경고가 남아서 옵션 파일로 옮겼다.
+      # 이 파일은 서버의 ~/policy 에만 있고 리포에는 없다(.gitignore). 만드는 명령은 backup.sh 맨 위 설명 참고.
+      # 파일이 없는 채로 기동하면 Docker 가 같은 이름의 빈 폴더를 만들어 접속이 실패하므로, 먼저 만든 뒤 올린다.
+      - ./mysql-client.cnf:/root/.my.cnf:ro
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD}"]
+      # 접속 정보는 /root/.my.cnf 에서 읽는다
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1"]
       interval: 10s
       timeout: 5s
       retries: 10

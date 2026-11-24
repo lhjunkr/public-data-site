@@ -36,3 +36,6 @@ out/
 ### VS Code ###
 .vscode/
 .env
+
+# DB 접속 정보 옵션 파일 (서버에만 둔다, 12/4)
+mysql-client.cnf
