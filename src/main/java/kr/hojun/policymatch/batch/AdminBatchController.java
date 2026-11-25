@@ -4,6 +4,7 @@ import java.util.Map;
 import kr.hojun.policymatch.admin.AdminToken;
 import kr.hojun.policymatch.collect.CollectResult;
 import kr.hojun.policymatch.collect.YouthApiException;
+import kr.hojun.policymatch.normalize.MassDeactivationException;
 import kr.hojun.policymatch.normalize.NormalizeResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -13,6 +14,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -42,10 +44,15 @@ public class AdminBatchController {
         return batch.collect();
     }
 
+    /**
+     * @param force true 면 대량 비활성 상한을 보지 않는다(D-019 "12/8 추가"). 상한에 걸려 멈춘 뒤, 원본 사이트에서
+     *              정책이 실제로 사라진 것을 확인했을 때만 쓴다.
+     */
     @PostMapping("/normalize")
-    public NormalizeResult normalize(@RequestHeader(value = "X-Admin-Token", required = false) String token) {
+    public NormalizeResult normalize(@RequestHeader(value = "X-Admin-Token", required = false) String token,
+                                     @RequestParam(defaultValue = "false") boolean force) {
         adminToken.check(token);
-        return batch.normalize();
+        return batch.normalize(force);
     }
 
     /** 매일 자동 실행과 똑같은 일(수집 → 성공하면 정규화)을 지금 한 번 돌린다. */
@@ -61,6 +68,17 @@ public class AdminBatchController {
         log.error("수집 실패", e);
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
                 .body(Map.of("error", "YOUTH_API_FAILURE", "message", e.getMessage()));
+    }
+
+    /**
+     * 대량 비활성 상한에 걸려 반영하지 않았다. 요청이 잘못된 것이 아니라 지금 데이터 상태로는 반영할 수 없다는 뜻이라 409.
+     * 확인 뒤 force=true 로 다시 부르면 된다.
+     */
+    @ExceptionHandler(MassDeactivationException.class)
+    public ResponseEntity<Map<String, String>> handleMassDeactivation(MassDeactivationException e) {
+        log.warn("관리 요청 — 대량 비활성 감지로 반영하지 않음: {}", e.getMessage());
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(Map.of("error", "MASS_DEACTIVATION", "message", e.getMessage()));
     }
 
     /** 다른 작업이 도는 중. 요청이 잘못된 것이 아니라 "지금은 안 됨"이므로 409. */

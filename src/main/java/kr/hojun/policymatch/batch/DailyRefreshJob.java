@@ -1,6 +1,7 @@
 package kr.hojun.policymatch.batch;
 
 import kr.hojun.policymatch.alert.AlertSender;
+import kr.hojun.policymatch.normalize.MassDeactivationException;
 import kr.hojun.policymatch.normalize.NormalizeResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,6 +16,8 @@ import org.springframework.stereotype.Component;
  *  - 실패해도 예외를 밖으로 던지지 않고 로그만 남긴다. 다음 날 다시 시도하고,
  *    그동안 화면은 마지막 성공 데이터를 보여 준다(D-017). 로그는 "매일 갱신"으로 찾는다.
  *  - 실패하면 휴대폰으로 알린다(D-026). 성공 · 건너뜀은 사람이 할 일이 없어 알리지 않는다.
+ *  - 대량 비활성으로 멈춘 경우(D-019 "12/8 추가")는 따로 알린다. 사람이 원본을 확인하고 강제 반영할지 정해야 하므로
+ *    건수와 확인 방법을 함께 보낸다.
  */
 @Component
 public class DailyRefreshJob {
@@ -42,10 +45,22 @@ public class DailyRefreshJob {
                     n.policies(), n.failed(), n.deactivated());
         } catch (BatchBusyException e) {
             log.warn("매일 갱신 건너뜀 — {}", e.getMessage());
+        } catch (MassDeactivationException e) {
+            log.error("매일 갱신 — 대량 비활성 감지로 정규화를 반영하지 않음", e);
+            alert.send(massDeactivationAlert(e));
         } catch (RuntimeException e) {
             log.error("매일 갱신 실패 — 마지막 성공 데이터로 계속 서비스합니다", e);
             alert.send("[chajaga] 매일 갱신 실패 — 마지막 성공 데이터로 계속 서비스 중입니다.\n" + summary(e));
         }
+    }
+
+    /** 대량 비활성 알림. 건수 · 비율 · 상한과 사람이 할 일을 적는다. 정책 번호 목록은 넣지 않는다(서버 로그에 있음). */
+    static String massDeactivationAlert(MassDeactivationException e) {
+        return "[chajaga] 대량 비활성 감지 — 오늘 정규화를 반영하지 않았습니다. 화면은 마지막 반영 데이터로 계속 서비스 중입니다.\n"
+                + "출처 " + e.source().code() + " · 비활성 예정 " + e.toDeactivate() + "건 / 활성 " + e.activeBefore()
+                + "건 (" + e.percent() + "%) · 상한 " + e.limit() + "건\n"
+                + "원본 사이트에서 실제로 사라졌는지 확인하고, 맞으면 관리 API 로 강제 반영: "
+                + "POST /api/v1/admin/normalize?force=true";
     }
 
     /**

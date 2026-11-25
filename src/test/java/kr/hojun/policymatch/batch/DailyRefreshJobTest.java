@@ -7,7 +7,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.function.Supplier;
 import kr.hojun.policymatch.alert.FakeAlertSender;
 import kr.hojun.policymatch.collect.CollectResult;
+import kr.hojun.policymatch.collect.Source;
 import kr.hojun.policymatch.collect.YouthApiException;
+import kr.hojun.policymatch.normalize.MassDeactivationException;
 import kr.hojun.policymatch.normalize.NormalizeResult;
 import org.junit.jupiter.api.Test;
 
@@ -50,6 +52,22 @@ class DailyRefreshJobTest {
 
         assertFalse(alert.sent.get(0).contains("SECRET-KEY-123"));
         assertTrue(alert.sent.get(0).contains("apiKeyNm=***"), "가렸다는 표시는 남긴다");
+    }
+
+    @Test
+    void 대량_비활성으로_멈추면_건수와_강제_반영_방법을_알린다() {
+        // D-019 "12/8 추가": 사람이 원본을 확인하고 정해야 하므로 일반 실패와 다른 글을 보낸다
+        runWith(() -> {
+            throw new MassDeactivationException(Source.YOUTH, 3994, 1997, 399);
+        });
+
+        assertEquals(1, alert.sent.size());
+        String text = alert.sent.get(0);
+        assertTrue(text.contains("대량 비활성 감지"));
+        assertTrue(text.contains("1997") && text.contains("3994") && text.contains("50%") && text.contains("399"),
+                "비활성 예정 · 활성 · 비율 · 상한");
+        assertTrue(text.contains("force=true"), "확인 뒤 할 일");
+        assertFalse(text.contains("매일 갱신 실패"), "일반 실패 알림과 섞이지 않는다");
     }
 
     @Test
