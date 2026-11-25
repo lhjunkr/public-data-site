@@ -39,3 +39,6 @@ out/
 
 # DB 접속 정보 옵션 파일 (서버에만 둔다, 12/4)
 mysql-client.cnf
+
+# 새 데이터원 응답 원본 표본 (12/5). 분석 결과만 docs/sources/ 에 남긴다
+samples/
