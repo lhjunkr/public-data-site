@@ -22,6 +22,8 @@ import org.springframework.transaction.annotation.Transactional;
  *   실제 원본은 선정 대상에서 빠진다(그래서 로컬 DB 에 데이터가 있어도 결과가 흔들리지 않는다).
  * - 선정 기준은 collect_run 의 마지막 SUCCESS 다(D-017). setUp 에서 LATEST 에 성공한 수집 기록을 넣는다.
  * - 이 정규화기는 온통청년(youth) 출처만 다룬다(D-029). 도우미는 모두 source = 'youth' 로 넣고 찾는다.
+ * - 로컬 DB 에 실제 정책이 들어 있어도 결과가 같도록, setUp 에서 시험용(T-) 이 아닌 활성 정책을 먼저 비활성으로 둔다.
+ *   그대로 두면 매 정규화가 실제 정책 수천 건을 비활성하려 해 대량 변경 감지(D-019 "12/8 추가")에 걸린다. CI 의 빈 DB 에서는 0건.
  */
 @SpringBootTest
 @Transactional
@@ -39,6 +41,7 @@ class PolicyNormalizerTest {
 
     @BeforeEach
     void setUp() {
+        jdbc.update("UPDATE policy SET active = FALSE WHERE source = 'youth' AND active = TRUE AND policy_no NOT LIKE 'T-%'");
         //   정책번호            승인 코드      중분류                           수집 시각  신청기간
         raw("T-N-IN",          APPROVED,     HOUSING,                         LATEST,   null);
         raw("T-N-MULTI",       APPROVED,     "취업,전월세 및 주거급여 지원",      LATEST,   null);
@@ -187,6 +190,59 @@ class PolicyNormalizerTest {
         assertTrue(active("T-N-IN"), "멈췄으므로 기존 활성 정책은 그대로");
     }
 
+    // ---------- 대량 변경 감지 (D-019 "12/8 추가") ----------
+
+    @Test
+    void 비활성이_상한을_넘으면_반영하지_않고_멈춘다() {
+        // 수집은 성공했는데 원본에서 정책이 대량으로 빠진 상황. 이번 원본에 없는 활성 정책이 상한(50건)보다 1건 많다
+        activeMissingFromRaw(MassDeactivationGuard.MIN_LIMIT + 1);
+
+        MassDeactivationException e = assertThrows(MassDeactivationException.class, normalizer::normalize);
+
+        assertEquals(51, e.toDeactivate());
+        assertEquals(51, e.activeBefore(), "기준은 정규화 전 활성 건수");
+        assertEquals(51, countActive("T-N-OLD-%"), "멈췄으므로 하나도 비활성하지 않았다");
+    }
+
+    @Test
+    void 비활성이_상한과_같으면_반영한다() {
+        activeMissingFromRaw(MassDeactivationGuard.MIN_LIMIT);
+
+        NormalizeResult result = normalizer.normalize();
+
+        assertEquals(50, result.deactivated());
+        assertEquals(0, countActive("T-N-OLD-%"));
+        assertTrue(active("T-N-IN"));
+    }
+
+    @Test
+    void 강제_반영하면_상한을_넘어도_반영한다() {
+        // 사람이 원본 사이트에서 정책이 실제로 사라진 것을 확인한 뒤 관리 API(force=true)로 부르는 경로
+        activeMissingFromRaw(MassDeactivationGuard.MIN_LIMIT + 1);
+
+        NormalizeResult result = normalizer.normalizeAllowingMassDeactivation();
+
+        assertEquals(51, result.deactivated());
+        assertEquals(0, countActive("T-N-OLD-%"));
+        assertTrue(active("T-N-IN"));
+    }
+
+    @Test
+    void 다른_출처의_활성_정책은_상한_계산에_넣지_않는다() {
+        // K-Startup 활성 100건이 있어도 온통청년 정규화의 활성 건수 · 비활성 예정 건수에 섞이지 않는다
+        for (int i = 0; i < 100; i++) {
+            jdbc.update("INSERT INTO policy (source, policy_no, title) VALUES ('kstartup', ?, '창업 공고')", "T-N-KS-" + i);
+        }
+        activeMissingFromRaw(MassDeactivationGuard.MIN_LIMIT);
+
+        NormalizeResult result = normalizer.normalize();
+
+        assertEquals(50, result.deactivated());
+        assertEquals(100, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM policy WHERE source = 'kstartup' AND active = TRUE AND policy_no LIKE 'T-N-KS-%'",
+                Integer.class));
+    }
+
     // ---------- 수집 기록 기준 (D-017) ----------
 
     @Test
@@ -288,6 +344,19 @@ class PolicyNormalizerTest {
         raw(no, APPROVED, HOUSING, LATEST, null);
         jdbc.update("UPDATE policy_raw SET raw_json = JSON_SET(raw_json, '$.refUrlAddr1', ?) WHERE policy_no = ?",
                 "https://example.com/" + "a".repeat(3000), no);
+    }
+
+    /** 이번 원본에는 없고 지금 활성인 온통청년 정책을 n건 만든다. 정규화가 이것들을 비활성하려 한다 */
+    private void activeMissingFromRaw(int n) {
+        for (int i = 0; i < n; i++) {
+            jdbc.update("INSERT INTO policy (source, policy_no, title) VALUES ('youth', ?, '이번 원본에 없는 정책')",
+                    "T-N-OLD-" + i);
+        }
+    }
+
+    private int countActive(String policyNoPattern) {
+        return jdbc.queryForObject("SELECT COUNT(*) FROM policy WHERE source = 'youth' AND active = TRUE AND policy_no LIKE ?",
+                Integer.class, policyNoPattern);
     }
 
     private void run(String startedAt, String status) {

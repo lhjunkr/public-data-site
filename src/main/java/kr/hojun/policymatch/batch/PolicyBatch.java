@@ -45,6 +45,18 @@ public class PolicyBatch {
     }
 
     public NormalizeResult normalize() {
+        return normalize(false);
+    }
+
+    /**
+     * @param allowMassDeactivation true 면 대량 비활성 상한을 보지 않는다(D-019 "12/8 추가").
+     *        사람이 원본을 확인한 뒤 관리 API 로만 켠다. 수집+정규화(refresh)에는 이 선택지를 두지 않는다 —
+     *        방금 받은, 아무도 확인하지 않은 데이터를 상한 없이 반영하게 되기 때문이다.
+     */
+    public NormalizeResult normalize(boolean allowMassDeactivation) {
+        if (allowMassDeactivation) {
+            return exclusive("정규화(강제)", normalizer::normalizeAllowingMassDeactivation);
+        }
         return exclusive("정규화", normalizer::normalize);
     }
 

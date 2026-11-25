@@ -45,6 +45,11 @@ import tools.jackson.databind.ObjectMapper;
  *  - 정책 하나의 값이 칸보다 길다는 이유로 3,763건 전체가 멈췄던 일(10/30)이 있었다. 이제 그런 정책은 건너뛰고
  *    로그와 failed 수로 남긴다. 다만 실패가 많으면(10건 또는 후보의 1% 초과) 구조 문제로 보고 전체를 되돌린다.
  *
+ * 대량 변경 감지 (D-019 "12/8 추가", MassDeactivationGuard)
+ *  - 한 번에 비활성하려는 정책이 상한(최소 50건, 정규화 전 활성의 10%)을 넘으면 전체를 되돌리고 멈춘다.
+ *    수집이 "성공"이어도 원본이 크게 줄었다면 정책이 사라진 것보다 데이터가 깨졌을 가능성이 크기 때문이다.
+ *  - 사람이 확인한 뒤에는 normalizeAllowingMassDeactivation() 으로 상한 없이 반영한다(관리 API 의 force=true).
+ *
  * 쓰기량 (D-018): 대상이 742건에서 3,763건으로 늘어 매일 도는 배치의 쓰기를 줄였다.
  *  - 지역 코드 마스터(region)는 이미 있는 코드를 처음에 한 번 읽어 두고 새 코드만 넣는다.
  *  - 연결 표는 여러 행을 한 문장(INSERT ... VALUES (..), (..))으로 넣고, 값이 같으면 건너뛴다.
@@ -102,6 +107,10 @@ public class PolicyNormalizer {
     private static final String DEACTIVATE_OTHERS =
             "UPDATE policy SET active = FALSE WHERE source = ? AND active = TRUE AND policy_no NOT IN (%s)";
 
+    /** DEACTIVATE_OTHERS 가 바꿀 행 수. 조건이 같아야 하므로 WHERE 를 그대로 쓴다. 바꾸기 전에 상한을 확인하는 데 쓴다. */
+    private static final String COUNT_TO_DEACTIVATE =
+            "SELECT COUNT(*) FROM policy WHERE source = ? AND active = TRUE AND policy_no NOT IN (%s)";
+
     private final JdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
     private final CurationProperties props;
@@ -115,9 +124,28 @@ public class PolicyNormalizer {
         this.categories = categories;
     }
 
+    /** 매일 갱신과 관리 API 가 부르는 기본 정규화. 비활성이 상한을 넘으면 MassDeactivationException 으로 전체를 되돌린다. */
     @Transactional
     public NormalizeResult normalize() {
+        return run(false);
+    }
+
+    /**
+     * 대량 비활성 상한을 보지 않고 반영한다. 상한에 걸려 멈춘 뒤, 사람이 원본 사이트에서 정책이 실제로 사라진 것을
+     * 확인했을 때만 관리 API(force=true)로 부른다. 매일 자동 갱신은 이 메서드를 부르지 않는다.
+     *
+     * normalize() 안에서 run(true) 로 부르지 않고 따로 둔 이유: 같은 객체 안의 호출은 스프링 프록시를 거치지 않아
+     * 트랜잭션 설정(@Transactional)이 적용되지 않는다. 그래서 바깥에서 부르는 두 메서드에 모두 붙인다.
+     */
+    @Transactional
+    public NormalizeResult normalizeAllowingMassDeactivation() {
+        return run(true);
+    }
+
+    private NormalizeResult run(boolean allowMassDeactivation) {
         long startedMs = System.currentTimeMillis();
+        // 상한의 기준은 "이번 정규화 전" 활성 건수다. 아래 upsert 가 다시 나타난 정책을 활성으로 바꾸므로 먼저 센다
+        int activeBefore = countActive();
         List<String> rawRows = selectCandidates();
         log.info("선정 후보 {}건", rawRows.size());
 
@@ -188,6 +216,16 @@ public class PolicyNormalizer {
             throw new IllegalStateException("선정된 정책이 0건이라 비활성 처리를 하지 않고 중단합니다. "
                     + "성공한 수집(collect_run 의 SUCCESS)이 있는지, policy_raw 가 비어 있지 않은지 확인하십시오.");
         }
+        // D-019 "12/8 추가": 바꾸기 전에 몇 건이 꺼질지 세고, 상한을 넘으면 바꾸지 않고 멈춘다(트랜잭션 전체가 되돌려짐)
+        int toDeactivate = countToDeactivate(selectedNos);
+        if (allowMassDeactivation) {
+            if (toDeactivate > MassDeactivationGuard.limitFor(activeBefore)) {
+                log.warn("대량 비활성 강제 반영 — 활성 {}건 중 {}건 비활성 (상한 {}건)",
+                        activeBefore, toDeactivate, MassDeactivationGuard.limitFor(activeBefore));
+            }
+        } else {
+            MassDeactivationGuard.check(SOURCE, activeBefore, toDeactivate);
+        }
         int deactivated = deactivateOthers(selectedNos);
 
         if (!unmappedMediums.isEmpty()) {
@@ -225,11 +263,33 @@ public class PolicyNormalizer {
 
     /** 이번에 선정된 정책 번호 목록에 없는 정책을 비활성으로 바꾸고, 바뀐 행 수를 돌려준다. */
     private int deactivateOthers(List<String> selectedNos) {
-        String placeholders = String.join(",", Collections.nCopies(selectedNos.size(), "?"));
+        return jdbc.update(DEACTIVATE_OTHERS.formatted(placeholders(selectedNos)), sourceAnd(selectedNos));
+    }
+
+    /** deactivateOthers 가 비활성으로 바꿀 행 수. 바꾸지 않고 세기만 한다. */
+    private int countToDeactivate(List<String> selectedNos) {
+        Integer n = jdbc.queryForObject(COUNT_TO_DEACTIVATE.formatted(placeholders(selectedNos)), Integer.class,
+                sourceAnd(selectedNos));
+        return n == null ? 0 : n;
+    }
+
+    /** 이 출처의 지금 활성 정책 수. */
+    private int countActive() {
+        Integer n = jdbc.queryForObject("SELECT COUNT(*) FROM policy WHERE source = ? AND active = TRUE",
+                Integer.class, SOURCE.code());
+        return n == null ? 0 : n;
+    }
+
+    private static String placeholders(List<String> values) {
+        return String.join(",", Collections.nCopies(values.size(), "?"));
+    }
+
+    /** SQL 인자: 출처 코드 다음에 정책 번호들. NOT IN 자리의 값도 모두 파라미터로 넘긴다(문자열에 이어 붙이는 것은 ? 뿐). */
+    private static Object[] sourceAnd(List<String> selectedNos) {
         List<Object> args = new ArrayList<>(selectedNos.size() + 1);
         args.add(SOURCE.code());
         args.addAll(selectedNos);
-        return jdbc.update(DEACTIVATE_OTHERS.formatted(placeholders), args.toArray());
+        return args.toArray();
     }
 
     private void upsertPolicy(JsonNode n, String policyNo) {

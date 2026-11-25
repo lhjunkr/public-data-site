@@ -90,6 +90,20 @@ class PolicyBatchTest {
         assertEquals(1, normalizer.calls.get(), "실패 뒤에도 다음 작업이 실행된다");
     }
 
+    @Test
+    void 강제_정규화는_상한을_보지_않는_경로로만_간다() {
+        // D-019 "12/8 추가": force=true 일 때만 상한 없이 반영한다. 기본 정규화 · 수집+정규화는 상한을 본다
+        FakeNormalizer normalizer = new FakeNormalizer();
+        PolicyBatch batch = new PolicyBatch(new FakeCollector(() -> COLLECTED), normalizer);
+
+        batch.normalize(true);
+        batch.normalize();
+        batch.refresh();
+
+        assertEquals(1, normalizer.forcedCalls.get());
+        assertEquals(2, normalizer.calls.get());
+    }
+
     // ---------- 가짜 ----------
 
     private static void await(CountDownLatch latch) {
@@ -118,6 +132,7 @@ class PolicyBatchTest {
     /** DB 를 건드리지 않고 불린 횟수만 센다. */
     private static class FakeNormalizer extends PolicyNormalizer {
         final AtomicInteger calls = new AtomicInteger();
+        final AtomicInteger forcedCalls = new AtomicInteger();
 
         FakeNormalizer() {
             super(null, null, null, null);
@@ -126,6 +141,12 @@ class PolicyBatchTest {
         @Override
         public NormalizeResult normalize() {
             calls.incrementAndGet();
+            return new NormalizeResult(3763, 3763, 0, 0, 0, 0, 0, 0, 0);
+        }
+
+        @Override
+        public NormalizeResult normalizeAllowingMassDeactivation() {
+            forcedCalls.incrementAndGet();
             return new NormalizeResult(3763, 3763, 0, 0, 0, 0, 0, 0, 0);
         }
     }
