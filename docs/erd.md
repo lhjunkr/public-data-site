@@ -1,8 +1,8 @@
 # ERD — 청년정책 매칭 서비스
 
-기준: Flyway 마이그레이션 V1 ~ V9 (2026-11-25). 표 정의의 원본은 [`src/main/resources/db/migration`](../src/main/resources/db/migration)이다.
+기준: Flyway 마이그레이션 V1 ~ V10 (2026-11-25). 표 정의의 원본은 [`src/main/resources/db/migration`](../src/main/resources/db/migration)이다.
 
-새 데이터원 4개를 넣기 위한 구조 변경(D-029, 12/7 V10 예정)은 맨 아래 [변경안](#변경안-d-029--새-데이터원-4개)에 있다.
+새 데이터원 4개를 넣기 위한 구조(D-029)는 맨 아래 [변경안](#변경안-d-029--새-데이터원-4개)에 있다. 그중 출처 칸 · 유니크 키 · 출처별 수집 기록은 V10(12/7)으로 반영했다.
 
 ## 한눈에 보기
 
@@ -24,6 +24,7 @@ erDiagram
 
     COLLECT_RUN {
         bigint   id PK
+        varchar  source "출처 (D-029)"
         datetime started_at "수집 시작 = 이번 수집의 fetched_at"
         datetime finished_at
         varchar  status "RUNNING / SUCCESS / FAILED"
@@ -34,6 +35,7 @@ erDiagram
 
     POLICY_RAW {
         bigint   id PK
+        varchar  source UK "(source, policy_no)"
         varchar  policy_no UK
         json     raw_json "API 응답 한 건 그대로"
         datetime fetched_at
@@ -41,6 +43,7 @@ erDiagram
 
     POLICY {
         bigint   id PK
+        varchar  source UK "(source, policy_no)"
         varchar  policy_no UK
         varchar  title
         varchar  category_large "원본 대분류"
@@ -189,12 +192,12 @@ ORDER BY p.view_count DESC, p.id
 
 | 표 | 키 · 인덱스 | 쓰임 |
 |---|---|---|
-| `policy_raw` | `uk_policy_raw_policy_no` | 수집 upsert |
-| `policy` | `uk_policy_policy_no` | 정규화 upsert |
+| `policy_raw` | `uk_policy_raw_source_no (source, policy_no)` | 수집 upsert (V10에서 `policy_no` 하나 → 출처와 함께) |
+| `policy` | `uk_policy_source_no (source, policy_no)` | 정규화 upsert. 번호로 찾을 때도 `source`를 함께 줘야 이 인덱스를 탄다 |
 | `policy` | `idx_policy_age (min_age, max_age)` | 나이 조건 |
 | `policy_sido` · `policy_region` · `policy_job` · `policy_category` | 기본 키 `(policy_id, 값)` | 같은 연결이 두 번 들어가지 않게 하고, `EXISTS`가 정책 id로 바로 찾는다 |
 | `policy_category` | `idx_policy_category_code` | 분류별 집계 |
-| `collect_run` | `idx_collect_run_status_started (status, started_at)` | 마지막 성공 수집 찾기 |
+| `collect_run` | `idx_collect_run_source_status_started (source, status, started_at)` | 출처별 마지막 성공 수집 찾기 |
 | `feedback` | `idx_feedback_status (status, created_at)` · `idx_feedback_created` | 처리 전 목록 · 하루 상한 · 90일 정리 |
 
 외래 키: `policy_sido` → `policy` / `policy_region` → `policy`, `region` / `policy_job` → `policy` / `policy_category` → `policy`.
@@ -212,7 +215,7 @@ ORDER BY p.view_count DESC, p.id
 | V7 | URL 2,048자 · 분류 이름 200자로 확장 | D-019 |
 | V8 | `feedback` | D-024 |
 | V9 | `policy_sido` (시도 단위 연결 표) + 기존 `policy_region`으로 채움 | D-027 |
-| V10 (예정, 12/7) | `source` 칸 · 유니크 키 `(source, policy_no)` · `collect_run.source` | D-029 |
+| V10 | `source` 칸(기본값 `youth`) · 유니크 키 `(source, policy_no)` · `collect_run.source` | D-029 |
 
 ## 변경안 (D-029) — 새 데이터원 4개
 
@@ -243,6 +246,8 @@ ORDER BY p.view_count DESC, p.id
 | (새 표 없음) | — | 여러 값은 기존 연결 표로 |
 
 `policy_no`는 이름을 바꾸지 않고 "그 소스의 원본 식별자"로 쓴다. 기존 행은 기본값 `youth`(온통청년)로 채워진다.
+
+**기본값 `youth`는 일부러 남긴다(12/7).** 확장 → 전환 → 축소의 "확장" 단계다. 배포 뒤 문제가 생겨 이전 이미지로 되돌리면, `source`를 모르는 이전 코드가 `source` 없이 `INSERT`한다 — 기본값이 없으면 그 순간 수집이 멈춘다. 새 코드는 기본값에 기대지 않고 `source`를 항상 직접 넘기고, 새 소스가 모두 붙어 안정되면(12/16 뒤) 기본값을 지운다(축소).
 
 ### 소스별로 칸에 넣는 값
 

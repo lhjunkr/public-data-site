@@ -19,8 +19,8 @@ import org.springframework.stereotype.Repository;
 public class PolicyRawStore {
 
     private static final String UPSERT_SQL = """
-            INSERT INTO policy_raw (policy_no, raw_json, fetched_at)
-            VALUES (?, ?, ?) AS src
+            INSERT INTO policy_raw (source, policy_no, raw_json, fetched_at)
+            VALUES (?, ?, ?, ?) AS src
             ON DUPLICATE KEY UPDATE
                 raw_json   = src.raw_json,
                 fetched_at = src.fetched_at
@@ -32,22 +32,26 @@ public class PolicyRawStore {
         this.jdbc = jdbc;
     }
 
-    /** 한 페이지 분량을 한 번에 적재한다. 같은 policy_no 는 덮어쓰므로 몇 번 돌려도 결과가 같다. */
-    public int upsertAll(List<RawItem> items, LocalDateTime fetchedAt) {
+    /**
+     * 한 페이지 분량을 한 번에 적재한다. 같은 (source, policy_no) 는 덮어쓰므로 몇 번 돌려도 결과가 같다.
+     * source 는 기본값(V10 의 'youth')에 기대지 않고 항상 직접 넘긴다(D-029).
+     */
+    public int upsertAll(Source source, List<RawItem> items, LocalDateTime fetchedAt) {
         if (items.isEmpty()) {
             return 0;
         }
         Timestamp at = Timestamp.valueOf(fetchedAt);
         List<Object[]> batch = new ArrayList<>(items.size());
         for (RawItem item : items) {
-            batch.add(new Object[] { item.policyNo(), item.rawJson(), at });
+            batch.add(new Object[] { source.code(), item.policyNo(), item.rawJson(), at });
         }
         int[] affected = jdbc.batchUpdate(UPSERT_SQL, batch);
         return affected.length;
     }
 
-    public long count() {
-        Long n = jdbc.queryForObject("SELECT COUNT(*) FROM policy_raw", Long.class);
+    /** 이 출처의 원본 행 수. */
+    public long count(Source source) {
+        Long n = jdbc.queryForObject("SELECT COUNT(*) FROM policy_raw WHERE source = ?", Long.class, source.code());
         return n == null ? 0L : n;
     }
 

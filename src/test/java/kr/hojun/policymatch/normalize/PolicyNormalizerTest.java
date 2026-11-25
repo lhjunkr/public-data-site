@@ -21,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
  * - 수집 시각은 2099년으로 넣는다. 실제 데이터보다 항상 뒤이므로 LATEST 가 "마지막 성공 수집"이 되고,
  *   실제 원본은 선정 대상에서 빠진다(그래서 로컬 DB 에 데이터가 있어도 결과가 흔들리지 않는다).
  * - 선정 기준은 collect_run 의 마지막 SUCCESS 다(D-017). setUp 에서 LATEST 에 성공한 수집 기록을 넣는다.
+ * - 이 정규화기는 온통청년(youth) 출처만 다룬다(D-029). 도우미는 모두 source = 'youth' 로 넣고 찾는다.
  */
 @SpringBootTest
 @Transactional
@@ -213,6 +214,46 @@ class PolicyNormalizerTest {
         assertTrue(active("T-N-IN"), "멈췄으므로 기존 활성 정책은 그대로");
     }
 
+    // ---------- 출처 (D-029) ----------
+
+    @Test
+    void 다른_출처의_정책은_선정_목록에_없어도_비활성하지_않는다() {
+        // 온통청년 정규화는 온통청년 행만 비활성한다. 아니면 K-Startup 공고가 매일 04:10 에 전부 꺼진다
+        jdbc.update("INSERT INTO policy (source, policy_no, title) VALUES ('kstartup', 'T-N-KS', '창업 공고')");
+
+        normalizer.normalize();
+
+        assertTrue(Boolean.TRUE.equals(jdbc.queryForObject(
+                "SELECT active FROM policy WHERE source = 'kstartup' AND policy_no = 'T-N-KS'", Boolean.class)));
+        assertTrue(active("T-N-IN"));
+    }
+
+    @Test
+    void 다른_출처의_수집_성공은_선정_기준으로_쓰지_않는다() {
+        // 온통청년 성공(LATEST)보다 뒤에 K-Startup 수집이 성공했다. 출처를 가리지 않고 "마지막 성공"을 찾으면
+        // 온통청년 원본이 모두 그보다 이전이라 0건 선정 → 정규화가 멈춘다(그대로 두었다면 매일 갱신이 실패했을 것)
+        run("kstartup", FAILED_AT, "SUCCESS");
+
+        NormalizeResult result = normalizer.normalize();
+
+        assertTrue(active("T-N-IN"));
+        assertTrue(active("T-N-MULTI"));
+        assertTrue(result.policies() >= 4, "온통청년의 마지막 성공(LATEST) 이후 원본이 선정된다");
+    }
+
+    @Test
+    void 같은_번호라도_출처가_다르면_다른_행이다() {
+        // 유니크 키가 (source, policy_no). 다른 출처의 같은 번호를 덮어쓰지 않는다
+        jdbc.update("INSERT INTO policy (source, policy_no, title) VALUES ('kstartup', 'T-N-IN', '다른 출처')");
+
+        normalizer.normalize();
+
+        assertEquals("T-N-IN", jdbc.queryForObject(
+                "SELECT title FROM policy WHERE source = 'youth' AND policy_no = 'T-N-IN'", String.class));
+        assertEquals("다른 출처", jdbc.queryForObject(
+                "SELECT title FROM policy WHERE source = 'kstartup' AND policy_no = 'T-N-IN'", String.class));
+    }
+
     // ---------- 실패 격리 (D-019) ----------
 
     @Test
@@ -250,8 +291,12 @@ class PolicyNormalizerTest {
     }
 
     private void run(String startedAt, String status) {
-        jdbc.update("INSERT INTO collect_run (started_at, finished_at, status) VALUES (?, ?, ?)",
-                startedAt, startedAt, status);
+        run("youth", startedAt, status);
+    }
+
+    private void run(String source, String startedAt, String status) {
+        jdbc.update("INSERT INTO collect_run (source, started_at, finished_at, status) VALUES (?, ?, ?, ?)",
+                source, startedAt, startedAt, status);
     }
 
     private void raw(String no, String status, String mediumCategory, String fetchedAt, String period) {
@@ -261,36 +306,37 @@ class PolicyNormalizerTest {
                  "earnCndSeCd":"0043001","zipCd":"99001,99002","jobCd":"0013010"%s}
                 """.formatted(no, no, status, mediumCategory,
                 period == null ? "" : ",\"aplyYmd\":\"" + period + "\"");
-        jdbc.update("INSERT INTO policy_raw (policy_no, raw_json, fetched_at) VALUES (?, ?, ?)",
+        jdbc.update("INSERT INTO policy_raw (source, policy_no, raw_json, fetched_at) VALUES ('youth', ?, ?, ?)",
                 no, json, fetchedAt);
     }
 
     private boolean active(String no) {
         return Boolean.TRUE.equals(
-                jdbc.queryForObject("SELECT active FROM policy WHERE policy_no = ?", Boolean.class, no));
+                jdbc.queryForObject("SELECT active FROM policy WHERE source = 'youth' AND policy_no = ?",
+                        Boolean.class, no));
     }
 
     private boolean exists(String no) {
         return Boolean.TRUE.equals(jdbc.queryForObject(
-                "SELECT EXISTS (SELECT 1 FROM policy WHERE policy_no = ?)", Boolean.class, no));
+                "SELECT EXISTS (SELECT 1 FROM policy WHERE source = 'youth' AND policy_no = ?)", Boolean.class, no));
     }
 
     private List<String> chips(String no) {
         return jdbc.queryForList("""
                 SELECT pc.category_code FROM policy_category pc JOIN policy p ON p.id = pc.policy_id
-                WHERE p.policy_no = ? ORDER BY pc.category_code
+                WHERE p.source = 'youth' AND p.policy_no = ? ORDER BY pc.category_code
                 """, String.class, no);
     }
 
     private List<String> sidos(String no) {
         return jdbc.queryForList("""
                 SELECT ps.sido FROM policy_sido ps JOIN policy p ON p.id = ps.policy_id
-                WHERE p.policy_no = ? ORDER BY ps.sido
+                WHERE p.source = 'youth' AND p.policy_no = ? ORDER BY ps.sido
                 """, String.class, no);
     }
 
     private long idOf(String no) {
-        return jdbc.queryForObject("SELECT id FROM policy WHERE policy_no = ?", Long.class, no);
+        return jdbc.queryForObject("SELECT id FROM policy WHERE source = 'youth' AND policy_no = ?", Long.class, no);
     }
 
     private List<Map<String, Object>> snapshot() {
@@ -301,7 +347,7 @@ class PolicyNormalizerTest {
                        (SELECT COUNT(*) FROM policy_job pj WHERE pj.policy_id = p.id) AS jobs,
                        (SELECT COUNT(*) FROM policy_category pc WHERE pc.policy_id = p.id) AS categories
                 FROM policy p
-                WHERE p.policy_no LIKE 'T-N-%'
+                WHERE p.source = 'youth' AND p.policy_no LIKE 'T-N-%'
                 ORDER BY p.policy_no
                 """);
     }

@@ -22,6 +22,9 @@ public class Policy {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    /** D-029: 출처 (youth = 온통청년). policy_no 와 함께 유니크하다. */
+    private String source;
+
     @Column(name = "policy_no")
     private String policyNo;
 
@@ -40,6 +43,7 @@ public class Policy {
     }
 
     public Long getId() { return id; }
+    public String getSource() { return source; }
     public String getPolicyNo() { return policyNo; }
     public String getTitle() { return title; }
     public String getCategoryLarge() { return categoryLarge; }

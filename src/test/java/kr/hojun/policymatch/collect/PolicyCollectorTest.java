@@ -40,6 +40,16 @@ class PolicyCollectorTest {
     }
 
     @Test
+    void 수집_기록과_원본에_출처_youth를_적는다() {
+        // D-029: 출처별로 성공 여부를 찾고 비활성 처리를 하므로, 온통청년 수집은 youth 로 남아야 한다
+        collector(5, 5, 0).collectAll();
+
+        assertEquals("youth", lastRun().get("source"));
+        assertEquals(5, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM policy_raw WHERE source = 'youth' AND policy_no LIKE 'T-C-%'", Integer.class));
+    }
+
+    @Test
     void 중간에_실패하면_FAILED로_기록하고_예외를_던진다() {
         // 10/30 사고: 9페이지에서 실패. 여기서는 2페이지에서 실패한다
         assertThrows(YouthApiException.class, () -> collector(5, 5, 2).collectAll());
@@ -73,7 +83,7 @@ class PolicyCollectorTest {
     }
 
     private Map<String, Object> lastRun() {
-        return jdbc.queryForMap("SELECT status, items_seen FROM collect_run ORDER BY id DESC LIMIT 1");
+        return jdbc.queryForMap("SELECT source, status, items_seen FROM collect_run ORDER BY id DESC LIMIT 1");
     }
 
     static class FakeClient extends YouthApiClient {
