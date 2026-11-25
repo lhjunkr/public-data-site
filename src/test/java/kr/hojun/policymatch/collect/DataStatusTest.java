@@ -34,9 +34,20 @@ class DataStatusTest {
 
     @Test
     void 기준_시각은_마지막_성공_수집의_시작_시각이다() throws Exception {
-        jdbc.update("INSERT INTO collect_run (started_at, status) VALUES ('2099-01-02 04:10:00', 'SUCCESS')");
+        jdbc.update("INSERT INTO collect_run (source, started_at, status) VALUES ('youth', '2099-01-02 04:10:00', 'SUCCESS')");
         // 11/1 처럼 다음 날 실패하면 화면에는 전날 시각이 그대로 보여야 한다
-        jdbc.update("INSERT INTO collect_run (started_at, status) VALUES ('2099-01-03 04:10:00', 'FAILED')");
+        jdbc.update("INSERT INTO collect_run (source, started_at, status) VALUES ('youth', '2099-01-03 04:10:00', 'FAILED')");
+
+        mvc.perform(get("/api/v1/data-status"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.updatedAt").value("2099-01-02 04:10"));
+    }
+
+    @Test
+    void 다른_출처의_수집_성공은_기준_시각에_쓰지_않는다() throws Exception {
+        // D-029: 지금 화면의 기준 시각은 온통청년 정책 정보의 시각이다
+        jdbc.update("INSERT INTO collect_run (source, started_at, status) VALUES ('youth', '2099-01-02 04:10:00', 'SUCCESS')");
+        jdbc.update("INSERT INTO collect_run (source, started_at, status) VALUES ('kstartup', '2099-01-05 04:20:00', 'SUCCESS')");
 
         mvc.perform(get("/api/v1/data-status"))
                 .andExpect(status().isOk())

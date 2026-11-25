@@ -19,6 +19,7 @@ import tools.jackson.databind.JsonNode;
  *    (docs/decisions.md 의 미해결 이슈 O-4), 빈 페이지를 만나면 그 자리에서 멈춘다.
  *  - 실행마다 collect_run 에 결과를 남긴다(D-017). 끝까지 읽고 totCount 의 95% 이상을 받아야 성공이다.
  *    정규화는 마지막으로 성공한 수집을 기준으로 정책을 고르므로, 실패한 수집이 정상 정책을 지우지 못한다.
+ *  - 원본 · 수집 기록에는 출처 youth 를 직접 적는다(D-029). 다른 출처의 수집과 성공 여부가 섞이지 않는다.
  */
 @Service
 public class PolicyCollector {
@@ -26,6 +27,7 @@ public class PolicyCollector {
     private static final Logger log = LoggerFactory.getLogger(PolicyCollector.class);
     private static final int MAX_PAGES = 200;      // 폭주 방지 상한
     private static final long PAGE_DELAY_MS = 200; // 상대 서버 배려
+    private static final Source SOURCE = Source.YOUTH;
 
     /** 성공으로 볼 최소 비율. 수집 도중 정책이 몇 건 삭제되는 정도(O-4)는 허용한다. */
     static final double MIN_COMPLETE_RATIO = 0.95;
@@ -46,7 +48,7 @@ public class PolicyCollector {
     public CollectResult collectAll() {
         // 초 단위로 자른다. collect_run.started_at 과 policy_raw.fetched_at 이 정확히 같은 값이어야 비교가 맞는다.
         LocalDateTime startedAt = LocalDateTime.now().truncatedTo(ChronoUnit.SECONDS);
-        long runId = runs.start(startedAt);
+        long runId = runs.start(SOURCE, startedAt);
 
         int totCount = 0;
         int itemsSeen = 0;
@@ -86,7 +88,7 @@ public class PolicyCollector {
         }
         runs.finish(runId, CollectRunStore.SUCCESS, totCount, itemsSeen, null);
 
-        long rows = store.count();
+        long rows = store.count(SOURCE);
         log.info("수집 완료 — run={} pagesRead={} itemsSeen={} policy_raw rows={}", runId, pagesRead, itemsSeen, rows);
         return new CollectResult(totCount, pagesRead, itemsSeen, rows);
     }
@@ -108,7 +110,7 @@ public class PolicyCollector {
             }
             items.add(new PolicyRawStore.RawItem(policyNo, item.toString()));
         }
-        return store.upsertAll(items, fetchedAt);
+        return store.upsertAll(SOURCE, items, fetchedAt);
     }
 
     private void sleepQuietly() {

@@ -13,6 +13,7 @@ import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import kr.hojun.policymatch.category.CategoryCatalog;
+import kr.hojun.policymatch.collect.Source;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
@@ -26,7 +27,7 @@ import tools.jackson.databind.ObjectMapper;
  * policy_raw 에 쌓인 원본을 정규화 표(policy / policy_region / policy_sido / policy_job / policy_category)로 옮긴다.
  *
  * 멱등성 설계
- *  - policy 는 policy_no 가 UNIQUE 이므로 ON DUPLICATE KEY UPDATE 로 덮어쓴다.
+ *  - policy 는 (source, policy_no) 가 UNIQUE 이므로 ON DUPLICATE KEY UPDATE 로 덮어쓴다(D-029).
  *  - 연결 표는 현재 값과 같게 맞춘다. 정책의 지원 지역이 줄어든 경우까지 반영하려면 추가만 해서는 안 되고,
  *    달라졌으면 그 정책의 기존 연결을 비운 뒤 현재 값으로 다시 채운다. 같으면 아무것도 쓰지 않는다.
  *
@@ -35,6 +36,10 @@ import tools.jackson.databind.ObjectMapper;
  *    화면에 어느 분류로 보일지는 묶음표(CategoryCatalog)가 정하고, policy_category 에 칩 코드로 남긴다.
  *  - 기준은 마지막으로 "성공한" 수집이다. 실패한 수집은 정상 정책을 비활성하지 못한다.
  *  - 규칙에서 빠진 정책은 지우지 않고 active = FALSE 로 바꾼다. 다시 규칙에 들면 TRUE 로 돌아온다.
+ *
+ * 출처 (D-029)
+ *  - 이 정규화기는 온통청년(youth) 원본만 읽고, youth 행만 쓰고 비활성한다. 마지막 성공 수집도 youth 의 것만 본다.
+ *    다른 출처의 수집이 성공했다고 "이번 수집에서 안 보인" 온통청년 정책 4천여 건을 비활성하면 10/30 사고와 같은 일이 난다.
  *
  * 실패 격리 (D-019)
  *  - 정책 하나의 값이 칸보다 길다는 이유로 3,763건 전체가 멈췄던 일(10/30)이 있었다. 이제 그런 정책은 건너뛰고
@@ -61,16 +66,18 @@ public class PolicyNormalizer {
     /** D-019: 정책 단위 실패를 이만큼(또는 후보의 1%)까지는 건너뛰고, 넘으면 전체를 되돌린다. */
     static final int MIN_FAILURE_LIMIT = 10;
 
+    private static final Source SOURCE = Source.YOUTH;
+
     private static final String UPSERT_POLICY = """
             INSERT INTO policy (
-                policy_no, title, category_large, category_medium,
+                source, policy_no, title, category_large, category_medium,
                 min_age, max_age, age_limit_yn,
                 earn_cnd_se_cd, earn_min_amt, earn_max_amt, earn_etc_cn,
                 description, support_content, apply_method, required_documents,
                 extra_qualification, etc_matters,
                 apply_period_text, apply_start_date, apply_end_date,
                 apply_url, ref_url, supervising_org, view_count
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) AS src
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) AS src
             ON DUPLICATE KEY UPDATE
                 title = src.title, category_large = src.category_large,
                 category_medium = src.category_medium,
@@ -89,10 +96,11 @@ public class PolicyNormalizer {
 
     /**
      * 이번에 선정되지 않은 정책을 비활성으로 바꾼다. {@code ?} 자리는 실행할 때 선정된 정책 수만큼 채운다.
+     * 같은 출처의 행만 본다(D-029). 다른 출처의 정책은 이 정규화의 선정 목록에 없어도 건드리지 않는다.
      * 이미 비활성인 행은 건드리지 않는다(active = TRUE 조건). 바뀐 것이 없는 행의 updated_at 을 지키기 위해서다.
      */
     private static final String DEACTIVATE_OTHERS =
-            "UPDATE policy SET active = FALSE WHERE active = TRUE AND policy_no NOT IN (%s)";
+            "UPDATE policy SET active = FALSE WHERE source = ? AND active = TRUE AND policy_no NOT IN (%s)";
 
     private final JdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
@@ -202,20 +210,26 @@ public class PolicyNormalizer {
      *    존재가 확인된 것이고, 갱신되지 못한 정책도 성공 수집 때의 값으로 남아 함께 선정된다.
      *  - 성공한 수집이 없으면 MAX 가 NULL 이라 아무것도 선정되지 않고, normalize() 가 0건으로 멈춘다.
      *  - 마감 여부는 여기서 보지 않는다. 매칭할 때 거른다(D-008).
+     *  - 원본도, 마지막 성공 수집도 같은 출처(youth)의 것만 본다(D-029).
      */
     private List<String> selectCandidates() {
         return jdbc.queryForList("""
                 SELECT raw_json FROM policy_raw
-                WHERE JSON_UNQUOTE(raw_json->'$.plcyAprvSttsCd') = ?
-                  AND fetched_at >= (SELECT MAX(started_at) FROM collect_run WHERE status = 'SUCCESS')
+                WHERE source = ?
+                  AND JSON_UNQUOTE(raw_json->'$.plcyAprvSttsCd') = ?
+                  AND fetched_at >= (SELECT MAX(started_at) FROM collect_run
+                                     WHERE source = ? AND status = 'SUCCESS')
                 ORDER BY policy_no
-                """, String.class, props.getApprovedStatusCode());
+                """, String.class, SOURCE.code(), props.getApprovedStatusCode(), SOURCE.code());
     }
 
     /** 이번에 선정된 정책 번호 목록에 없는 정책을 비활성으로 바꾸고, 바뀐 행 수를 돌려준다. */
     private int deactivateOthers(List<String> selectedNos) {
         String placeholders = String.join(",", Collections.nCopies(selectedNos.size(), "?"));
-        return jdbc.update(DEACTIVATE_OTHERS.formatted(placeholders), selectedNos.toArray());
+        List<Object> args = new ArrayList<>(selectedNos.size() + 1);
+        args.add(SOURCE.code());
+        args.addAll(selectedNos);
+        return jdbc.update(DEACTIVATE_OTHERS.formatted(placeholders), args.toArray());
     }
 
     private void upsertPolicy(JsonNode n, String policyNo) {
@@ -230,6 +244,7 @@ public class PolicyNormalizer {
         }
 
         jdbc.update(UPSERT_POLICY,
+                SOURCE.code(),
                 policyNo,
                 text(n, "plcyNm"),
                 text(n, "lclsfNm"),
@@ -257,7 +272,9 @@ public class PolicyNormalizer {
     }
 
     private long policyIdOf(String policyNo) {
-        return jdbc.queryForObject("SELECT id FROM policy WHERE policy_no = ?", Long.class, policyNo);
+        // 유니크 키가 (source, policy_no) 라서 source 를 함께 줘야 인덱스로 바로 찾는다. policy_no 만 주면 표 전체를 훑는다.
+        return jdbc.queryForObject("SELECT id FROM policy WHERE source = ? AND policy_no = ?", Long.class,
+                SOURCE.code(), policyNo);
     }
 
     /**
