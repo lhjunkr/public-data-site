@@ -19,7 +19,9 @@
 | 정책 | 약 4,000건. 지역 연결 21만 행을 시도 단위 1만 5천 행으로 줄여 매칭 |
 | 예: 25세 · 서울 | 476건으로 좁힘 (2026-11-22) |
 | 운영 | 2026-09-15 공개 · 매일 04:10 자동 갱신 · 실패 알림 · DB 백업 · `main` 머지 = 자동 배포 |
-| 기록 | 설계 결정 D-001 ~ D-027 · 테스트 112개 (실제 MySQL로 경계값 · 정규화 · API 확인) |
+| 기록 | 설계 결정 D-001 ~ D-029 · 테스트 139개 (실제 MySQL로 경계값 · 정규화 · API 확인) |
+
+기능 · 수치 · 사건 · 결정 전체는 한 장 요약 [`docs/project-summary.md`](docs/project-summary.md)에 있습니다.
 
 ### 성능 — 측정으로 병목을 찾아 하나씩 고침 ([D-027](docs/decisions.md), [측정 기록](docs/performance.md))
 
@@ -113,6 +115,7 @@ flowchart LR
         img["이미지 빌드 · 푸시<br/>태그 = 커밋 SHA"]
     end
     hub["Docker Hub<br/>lhjunkr/policy-match"]
+    offsite[("외부 저장소 Backblaze B2<br/>미국 · 암호화 · 7일치")]
 
     user -- "HTTPS :443 chajaga.com" --> caddy
     robot -- "HTTPS" --> caddy
@@ -123,6 +126,7 @@ flowchart LR
     backup --> db
     backup -- "사설망 복사" --> copy
     backup -- "백업 실패" --> discord
+    backup -- "암호화 후 복사" --> offsite
     ci -- "main 머지 시" --> img
     img --> hub
     img -- "SSH: deploy.sh" --> app
@@ -133,7 +137,7 @@ flowchart LR
 - **외부 입구는 Caddy의 80 · 443뿐입니다.** Caddy가 인증서를 자동으로 발급 · 갱신하고, http는 https로, www는 본 주소로 보냅니다. 앱의 8080은 서버 자신(`127.0.0.1`)에만 열려 있어 Caddy를 거치지 않고는 들어올 수 없습니다 (D-025).
 - **DB는 인터넷에 열지 않습니다.** 오라클 보안 목록은 3306을 VCN 내부 대역에서만 허용하고, 컨테이너 포트도 사설 IP에만 묶어 두 겹으로 막습니다 (D-026).
 - **알리는 쪽이 둘입니다.** 갱신 · 백업 실패와 새 의견은 앱 · 스크립트가 디스코드로 보내고, 사이트 · DB 장애는 바깥의 UptimeRobot이 `/health`(DB까지 확인, 실패 시 503)로 잡아 이메일로 보냅니다. 앱이 통째로 죽으면 앱은 알릴 수 없기 때문입니다 (D-026).
-- **백업은 복구해 봐야 백업입니다.** 매일 DB 서버와 앱 서버에 7일치씩 두고, 사본을 빈 MySQL에 복원해 표별 건수가 운영과 같은지 확인했습니다 (D-026).
+- **백업은 복구해 봐야 백업입니다.** 매일 DB 서버 · 앱 서버 · 외부 저장소(다른 회사 · 미국, 올리기 전 암호화)에 7일치씩 두고, 사본을 빈 MySQL에 복원해 표별 건수가 운영과 같은지 확인했습니다. 외부 사본은 오라클 서버 없이 암호만으로 복원되는지도 확인했습니다 (D-026).
 - **서버에서 빌드하지 않습니다.** 1GB로는 Gradle 빌드가 돌지 않아, GitHub Actions가 이미지를 만들고 서버는 내려받기만 합니다.
 
 ### 데이터 흐름
@@ -157,13 +161,13 @@ flowchart LR
 | 구분 | 사용 기술 |
 |---|---|
 | 언어 · 프레임워크 | Java 21, Spring Boot 4.1 |
-| 데이터 | MySQL 8.4, Flyway(V1~V9), JdbcTemplate · NamedParameterJdbcTemplate(조회 · 적재), JPA(스키마 검증) |
+| 데이터 | MySQL 8.4, Flyway(V1~V10), JdbcTemplate · NamedParameterJdbcTemplate(조회 · 적재), JPA(스키마 검증) |
 | 외부 연동 | RestClient (온통청년 Open API, 타임아웃 · 재시도) |
 | 예약 작업 | `@Scheduled` (매일 04:10 갱신, 04:30 이메일 보관 기간 정리) |
 | 화면 | 정적 HTML + `fetch` (`src/main/resources/static/index.html`) |
-| 테스트 | JUnit 5 · MockMvc, 실제 MySQL로 매칭 경계값 · 정규화 · 수집 · 의견 · 요청 제한 등 112개 |
+| 테스트 | JUnit 5 · MockMvc, 실제 MySQL로 매칭 경계값 · 정규화 · 수집 · 의견 · 요청 제한 · 대량 변경 감지 등 139개 |
 | 배포 | Docker, Docker Compose, Caddy 2(HTTPS · 응답 압축), Oracle Cloud VM 2대 |
-| 운영 | 디스코드 웹훅 알림, UptimeRobot 가동 감시, DB 백업(cron · `mysqldump`, 두 서버 7일치) |
+| 운영 | 디스코드 웹훅 알림, UptimeRobot 가동 감시, DB 백업(cron · `mysqldump`, 두 서버 + 외부 저장소 7일치, 외부 사본은 올리기 전 암호화) |
 | 측정 | `scripts/measure.sh`(구간별 응답 시간), k6(동시 사용자), `EXPLAIN ANALYZE`, `vmstat` |
 | CI · CD | GitHub Actions — PR마다 build + test, `main` 머지 시 이미지 빌드 → 서버 배포 → 공개 URL 확인 |
 
@@ -180,7 +184,7 @@ flowchart LR
 | `GET` | `/api/v1/policies/{id}` | 정책 하나의 지원 내용. 같은 IP에서 1분에 30번까지(넘으면 `429`) |
 | `POST` | `/api/v1/feedback` | 의견 보내기 (`message` 필수, `email` · `consent` 선택) |
 | `POST` | `/api/v1/admin/refresh` | 수집 → 성공하면 정규화. 매일 자동 갱신과 같은 일 (`X-Admin-Token` 필요) |
-| `POST` | `/api/v1/admin/collect` · `/normalize` | 수집 · 정규화를 따로 실행 (`X-Admin-Token` 필요) |
+| `POST` | `/api/v1/admin/collect` · `/normalize` | 수집 · 정규화를 따로 실행 (`X-Admin-Token` 필요). 정규화가 한 번에 끄는 정책이 상한을 넘으면 반영하지 않고 `409`, 원본을 확인한 뒤 `/normalize?force=true`로 반영 (D-019) |
 | `GET` | `/api/v1/admin/feedback?status=NEW` | 받은 의견 목록, 최근 100건 (`X-Admin-Token` 필요) |
 | `POST` | `/api/v1/admin/feedback/{id}/done` | 답장 · 처리 완료 표시, 이메일 삭제 (`X-Admin-Token` 필요) |
 
@@ -301,7 +305,7 @@ docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile --adapter c
 | 온통청년 데이터는 비영리로만 쓰고 출처를 표시, 전체 목록 API는 두지 않음 (D-023) | 약관은 사전 승낙 없는 제3자 제공과 동의 없는 상업적 이용을 금지한다. 검색 결과만 보여 준다 |
 | 의견 창의 이메일은 동의받은 경우만 받고 답장 후 또는 90일 뒤 삭제. 요청 제한용 IP는 메모리에만 잠깐(의견 10분 · 상세 1분) 두고 저장하지 않음. 디스코드 알림에는 의견 본문 · 이메일을 넣지 않음 (D-024, D-026) | 개인정보는 필요한 만큼만 받고 목적이 끝나면 지운다. 단, 지운 이메일도 DB 백업 파일에는 최대 7일 남는다 |
 | 도메인 + Caddy로 HTTPS, 앱 8080은 외부에 닫음 (D-025) | 나이 · 소득 · 이메일이 평문으로 오가던 것을 막고, 암호화 없이 앱에 바로 들어오는 우회 경로를 없앤다 |
-| 알림(디스코드) · 감시(UptimeRobot) · 백업(매일, 두 서버 7일치) (D-026) | 11/1 갱신 실패를 로그를 직접 열어 보고서야 알았다. 백업은 복원 연습으로 확인했다 |
+| 알림(디스코드) · 감시(UptimeRobot) · 백업(매일, 두 서버 + 외부 저장소 7일치) (D-026) | 11/1 갱신 실패를 로그를 직접 열어 보고서야 알았다. 백업은 복원 연습으로 확인했다 |
 | 성능은 측정으로 찾은 병목부터 하나씩 고치고, 고치기 전에 예측을 적는다 (D-027) | 짐작한 병목(범위 인덱스)은 SQL의 2%였다. 예측과 실측의 차이로 계산의 틀린 곳(고정 몫 · 전송 모델)도 찾았다 |
 
 ## 현재 한계와 다음 계획
@@ -318,7 +322,8 @@ docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile --adapter c
 
 ## 문서
 
-- [`docs/decisions.md`](docs/decisions.md) — 설계 결정 기록 (D-001 ~ D-027)
+- [`docs/project-summary.md`](docs/project-summary.md) — 한 장 요약 (기능 · 핵심 수치 · 타임라인 · 사건 · 결정)
+- [`docs/decisions.md`](docs/decisions.md) — 설계 결정 기록 (D-001 ~ D-029)
 - [`docs/performance.md`](docs/performance.md) — 성능 측정 · 원인 분석 · 개선 전후 (Before → ③, 예측과 실측)
 - [`docs/quality-check.md`](docs/quality-check.md) — 데이터 품질 측정, 원문 대조, 사건 기록
 - [`docs/operations-log.md`](docs/operations-log.md) — 운영 기록 (데이터 규모 추이, 배포 · 백업 · 복원 확인 수치)
