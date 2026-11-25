@@ -321,6 +321,7 @@ docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile --adapter c
 - [`docs/decisions.md`](docs/decisions.md) — 설계 결정 기록 (D-001 ~ D-027)
 - [`docs/performance.md`](docs/performance.md) — 성능 측정 · 원인 분석 · 개선 전후 (Before → ③, 예측과 실측)
 - [`docs/quality-check.md`](docs/quality-check.md) — 데이터 품질 측정, 원문 대조, 사건 기록
+- [`docs/operations-log.md`](docs/operations-log.md) — 운영 기록 (데이터 규모 추이, 배포 · 백업 · 복원 확인 수치)
 - [`docs/adr/ADR-001.md`](docs/adr/ADR-001.md) — 다중값을 연결 표로 저장한 근거
 - [`docs/erd.md`](docs/erd.md) — ERD와 API 필드 매핑
 - [`docs/retrospective.md`](docs/retrospective.md) — 회고 (계획과 실제, 틀렸던 것과 원인)
