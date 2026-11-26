@@ -54,21 +54,28 @@ public class AdminBatchController {
     }
 
     /**
-     * @param force true 면 대량 비활성 상한을 보지 않는다(D-019 "12/8 추가"). 상한에 걸려 멈춘 뒤, 원본 사이트에서
-     *              정책이 실제로 사라진 것을 확인했을 때만 쓴다.
+     * @param source youth(기본값) · kstartup (12/10)
+     * @param force  true 면 대량 비활성 상한을 보지 않는다(D-019 "12/8 추가"). 상한에 걸려 멈춘 뒤, 원본 사이트에서
+     *               정책이 실제로 사라진 것을 확인했을 때만 쓴다.
      */
     @PostMapping("/normalize")
     public NormalizeResult normalize(@RequestHeader(value = "X-Admin-Token", required = false) String token,
+                                     @RequestParam(defaultValue = "youth") String source,
                                      @RequestParam(defaultValue = "false") boolean force) {
         adminToken.check(token);
-        return batch.normalize(force);
+        return batch.normalize(Source.fromCode(source), force);
     }
 
-    /** 매일 자동 실행과 똑같은 일(수집 → 성공하면 정규화)을 지금 한 번 돌린다. */
+    /**
+     * 수집 → 성공하면 정규화를 지금 한 번 돌린다. 기본값(youth)은 매일 자동 실행과 똑같은 일이다.
+     *
+     * @param source youth(기본값) · kstartup (12/10)
+     */
     @PostMapping("/refresh")
-    public RefreshResult refresh(@RequestHeader(value = "X-Admin-Token", required = false) String token) {
+    public RefreshResult refresh(@RequestHeader(value = "X-Admin-Token", required = false) String token,
+                                 @RequestParam(defaultValue = "youth") String source) {
         adminToken.check(token);
-        return batch.refresh();
+        return batch.refresh(Source.fromCode(source));
     }
 
     /**

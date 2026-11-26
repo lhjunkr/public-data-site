@@ -180,6 +180,7 @@
   }
   .card .title { font-weight: 700; font-size: 16px; }
   .card .category { font-size: 12px; color: #888; margin-top: 2px; }
+  .card .source { font-size: 12px; color: #1a5fb4; margin-top: 2px; }
 
   .badge-row {
     display: flex;
@@ -302,6 +303,7 @@
 
 <footer>
   <p>정책 정보 출처: <a href="https://www.youthcenter.go.kr" target="_blank" rel="noopener noreferrer">온통청년</a> 청년정책 Open API (국무조정실 · 한국고용정보원)</p>
+  <p>창업지원 공고 출처: <a href="https://www.k-startup.go.kr" target="_blank" rel="noopener noreferrer">K-Startup</a> 사업공고 조회서비스 (창업진흥원 · 공공데이터포털)</p>
   <p id="updated"></p>
   <p>비영리 개인 프로젝트입니다. 정책 정보는 매일 새벽 원본에서 다시 받아 오며, 원본과 다를 수 있습니다.</p>
   <p><a href="/privacy.html"><strong>개인정보 처리방침</strong></a> · 문의 <a href="mailto:lhj020701@gmail.com">lhj020701@gmail.com</a></p>
@@ -556,10 +558,25 @@
       const info = chipInfo[code];
       if (info) names.push(info.tab.name + " · " + info.chip.name);
     }
-    if (names.length > 0) return names.join(", ");
+    if (names.length > 0) {
+      // 공고형은 원본 분야(예: 사업화)를 칩 뒤에 붙인다: "일자리 · 창업 · 사업화"
+      if (!isYouth(policy) && policy.categoryMedium) return names.join(", ") + " · " + policy.categoryMedium;
+      return names.join(", ");
+    }
     const large = policy.categoryLarge != null ? policy.categoryLarge : "";
     const medium = policy.categoryMedium != null ? policy.categoryMedium : "";
     return medium ? (large + " > " + medium) : large;
+  }
+
+  // ---- 출처 (D-029) -------------------------------------------------------
+  // 온통청년 정책은 따로 적지 않는다(하단 출처). 다른 출처의 공고는 카드에 출처를 적고,
+  // 원본에 소득 조건이 없으므로 소득 뱃지를 숨긴다("판단불가"가 모든 공고에 붙어 헷갈리지 않게).
+  const SOURCE_LABEL = {
+    kstartup: "출처: K-Startup 창업지원 공고"
+  };
+
+  function isYouth(policy) {
+    return policy.source == null || policy.source === "youth";
   }
 
   // ---- 소득 뱃지 -----------------------------------------------------------
@@ -588,31 +605,41 @@
     category.textContent = categoryLabel(policy);
     li.appendChild(category);
 
-    // 소득 뱃지 + (UNKNOWN일 때) 설명
-    const badgeRow = document.createElement("div");
-    badgeRow.className = "badge-row";
-
-    const badgeInfo = BADGE[policy.incomeStatus] || BADGE.UNKNOWN;
-    const badge = document.createElement("span");
-    badge.className = "badge " + badgeInfo.cls;
-    badge.textContent = badgeInfo.text;
-    badgeRow.appendChild(badge);
-
-    if (policy.incomeStatus === "UNKNOWN") {
-      const note = document.createElement("span");
-      note.className = "badge-note";
-      note.textContent =
-        "소득 조건을 자동으로 비교할 수 없습니다(글로만 적힌 기준이거나, 연소득을 입력하지 않음). 원문을 확인하세요.";
-      badgeRow.appendChild(note);
+    // 출처: 온통청년이 아닌 공고만
+    if (!isYouth(policy)) {
+      const source = document.createElement("div");
+      source.className = "source";
+      source.textContent = SOURCE_LABEL[policy.source] || ("출처: " + policy.source);
+      li.appendChild(source);
     }
-    li.appendChild(badgeRow);
 
-    // incomeNote (null이 아니면 그대로 표시)
-    if (policy.incomeNote != null) {
-      const incomeNote = document.createElement("div");
-      incomeNote.className = "income-note";
-      incomeNote.textContent = policy.incomeNote;
-      li.appendChild(incomeNote);
+    // 소득 뱃지 + (UNKNOWN일 때) 설명. 소득 조건이 없는 출처는 건너뛴다
+    if (isYouth(policy)) {
+      const badgeRow = document.createElement("div");
+      badgeRow.className = "badge-row";
+
+      const badgeInfo = BADGE[policy.incomeStatus] || BADGE.UNKNOWN;
+      const badge = document.createElement("span");
+      badge.className = "badge " + badgeInfo.cls;
+      badge.textContent = badgeInfo.text;
+      badgeRow.appendChild(badge);
+
+      if (policy.incomeStatus === "UNKNOWN") {
+        const note = document.createElement("span");
+        note.className = "badge-note";
+        note.textContent =
+          "소득 조건을 자동으로 비교할 수 없습니다(글로만 적힌 기준이거나, 연소득을 입력하지 않음). 원문을 확인하세요.";
+        badgeRow.appendChild(note);
+      }
+      li.appendChild(badgeRow);
+
+      // incomeNote (null이 아니면 그대로 표시)
+      if (policy.incomeNote != null) {
+        const incomeNote = document.createElement("div");
+        incomeNote.className = "income-note";
+        incomeNote.textContent = policy.incomeNote;
+        li.appendChild(incomeNote);
+      }
     }
 
     // needsCheck

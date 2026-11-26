@@ -12,6 +12,7 @@ package kr.hojun.policymatch.normalize;
  * @param skipped       정책번호가 없어 건너뛴 건수
  * @param failed        DB 에 넣다가 실패해 건너뛴 정책 수 (예: 값이 칸보다 김). 원인은 서버 로그 (D-019)
  * @param deactivated   이번 실행에서 규칙에서 빠져 비활성(active = FALSE)으로 바뀐 건수
+ * @param duplicates    다른 출처에 같은 공고(같은 식별자)가 있어 싣지 않은 건수 (D-029 ⑤, 12/10). 온통청년은 늘 0
  */
 public record NormalizeResult(int candidates, int policies, int regionLinks, int jobLinks, int categoryLinks,
-                              int uncategorized, int skipped, int failed, int deactivated) {}
+                              int uncategorized, int skipped, int failed, int deactivated, int duplicates) {}

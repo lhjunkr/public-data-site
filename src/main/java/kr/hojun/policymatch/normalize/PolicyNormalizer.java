@@ -55,7 +55,7 @@ import tools.jackson.databind.ObjectMapper;
  *  - 연결 표는 여러 행을 한 문장(INSERT ... VALUES (..), (..))으로 넣고, 값이 같으면 건너뛴다.
  */
 @Service
-public class PolicyNormalizer {
+public class PolicyNormalizer implements SourceNormalizer {
 
     private static final Logger log = LoggerFactory.getLogger(PolicyNormalizer.class);
 
@@ -124,7 +124,13 @@ public class PolicyNormalizer {
         this.categories = categories;
     }
 
+    @Override
+    public Source source() {
+        return SOURCE;
+    }
+
     /** 매일 갱신과 관리 API 가 부르는 기본 정규화. 비활성이 상한을 넘으면 MassDeactivationException 으로 전체를 되돌린다. */
+    @Override
     @Transactional
     public NormalizeResult normalize() {
         return run(false);
@@ -137,6 +143,7 @@ public class PolicyNormalizer {
      * normalize() 안에서 run(true) 로 부르지 않고 따로 둔 이유: 같은 객체 안의 호출은 스프링 프록시를 거치지 않아
      * 트랜잭션 설정(@Transactional)이 적용되지 않는다. 그래서 바깥에서 부르는 두 메서드에 모두 붙인다.
      */
+    @Override
     @Transactional
     public NormalizeResult normalizeAllowingMassDeactivation() {
         return run(true);
@@ -236,7 +243,7 @@ public class PolicyNormalizer {
                 policies, regionLinks, jobLinks, categoryLinks, uncategorized, skipped, failedNos.size(), deactivated,
                 System.currentTimeMillis() - startedMs);
         return new NormalizeResult(rawRows.size(), policies, regionLinks, jobLinks, categoryLinks,
-                uncategorized, skipped, failedNos.size(), deactivated);
+                uncategorized, skipped, failedNos.size(), deactivated, 0);
     }
 
     /**
