@@ -4,9 +4,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.List;
 import java.util.function.Supplier;
 import kr.hojun.policymatch.alert.FakeAlertSender;
 import kr.hojun.policymatch.collect.CollectResult;
+import kr.hojun.policymatch.collect.ExternalApiException;
+import kr.hojun.policymatch.collect.PolicyCollector;
 import kr.hojun.policymatch.collect.Source;
 import kr.hojun.policymatch.collect.YouthApiException;
 import kr.hojun.policymatch.normalize.MassDeactivationException;
@@ -55,6 +58,19 @@ class DailyRefreshJobTest {
     }
 
     @Test
+    void 알림에_공공데이터포털_인증키를_넣지_않는다() {
+        // 12/9: K-Startup 부터 쓰는 공공데이터포털 키(serviceKey=…). 12/16 매일 갱신에 붙기 전에 미리 막아 둔다
+        runWith(() -> {
+            throw new ExternalApiException(Source.KSTARTUP, "API 호출 실패 (page=2, 시도=3) ResourceAccessException: "
+                    + "I/O error on GET request for \"https://apis.data.go.kr/B552735/kisedKstartupService02"
+                    + "/getAnnouncementInformation02?serviceKey=SECRET%2BKEY&page=2\": Read timed out");
+        });
+
+        assertFalse(alert.sent.get(0).contains("SECRET"));
+        assertTrue(alert.sent.get(0).contains("serviceKey=***"));
+    }
+
+    @Test
     void 대량_비활성으로_멈추면_건수와_강제_반영_방법을_알린다() {
         // D-019 "12/8 추가": 사람이 원본을 확인하고 정해야 하므로 일반 실패와 다른 글을 보낸다
         runWith(() -> {
@@ -91,7 +107,8 @@ class DailyRefreshJobTest {
         private final Supplier<RefreshResult> behavior;
 
         FakeBatch(Supplier<RefreshResult> behavior) {
-            super(null, null);
+            // 배치는 온통청년 수집기가 있어야 만들어진다(12/9). 이 가짜는 refresh 만 쓰므로 빈 껍데기를 넘긴다
+            super(List.of(new PolicyCollector(null, null, null, null)), null);
             this.behavior = behavior;
         }
 

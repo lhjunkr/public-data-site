@@ -1,9 +1,12 @@
 package kr.hojun.policymatch.batch;
 
+import java.util.Locale;
 import java.util.Map;
 import kr.hojun.policymatch.admin.AdminToken;
 import kr.hojun.policymatch.collect.CollectResult;
-import kr.hojun.policymatch.collect.YouthApiException;
+import kr.hojun.policymatch.collect.ExternalApiException;
+import kr.hojun.policymatch.collect.Source;
+import kr.hojun.policymatch.collect.UnknownSourceException;
 import kr.hojun.policymatch.normalize.MassDeactivationException;
 import kr.hojun.policymatch.normalize.NormalizeResult;
 import org.slf4j.Logger;
@@ -38,10 +41,16 @@ public class AdminBatchController {
         this.adminToken = adminToken;
     }
 
+    /**
+     * 출처 하나의 원본만 수집한다(정규화는 하지 않음).
+     *
+     * @param source youth(기본값, 이전과 같음) · kstartup. 토큰을 먼저 확인하므로, 토큰 없이는 어떤 출처가 있는지도 알려 주지 않는다.
+     */
     @PostMapping("/collect")
-    public CollectResult collect(@RequestHeader(value = "X-Admin-Token", required = false) String token) {
+    public CollectResult collect(@RequestHeader(value = "X-Admin-Token", required = false) String token,
+                                 @RequestParam(defaultValue = "youth") String source) {
         adminToken.check(token);
-        return batch.collect();
+        return batch.collect(Source.fromCode(source));
     }
 
     /**
@@ -62,12 +71,23 @@ public class AdminBatchController {
         return batch.refresh();
     }
 
-    /** API 쪽 실패는 우리 서버의 버그가 아니라 외부 의존 실패이므로 502 로 구분해 돌려준다. */
-    @ExceptionHandler(YouthApiException.class)
-    public ResponseEntity<Map<String, String>> handleApiFailure(YouthApiException e) {
-        log.error("수집 실패", e);
+    /**
+     * API 쪽 실패는 우리 서버의 버그가 아니라 외부 의존 실패이므로 502 로 구분해 돌려준다.
+     * 오류 이름에 출처를 붙인다: YOUTH_API_FAILURE(이전과 같음) · KSTARTUP_API_FAILURE.
+     */
+    @ExceptionHandler(ExternalApiException.class)
+    public ResponseEntity<Map<String, String>> handleApiFailure(ExternalApiException e) {
+        log.error("수집 실패 — 출처 {}", e.source().code(), e);
+        String error = e.source().code().toUpperCase(Locale.ROOT) + "_API_FAILURE";
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
-                .body(Map.of("error", "YOUTH_API_FAILURE", "message", e.getMessage()));
+                .body(Map.of("error", error, "message", e.getMessage()));
+    }
+
+    /** ?source= 값이 없는 출처이거나 아직 수집기가 없는 출처. 요청이 잘못된 것이므로 400. */
+    @ExceptionHandler(UnknownSourceException.class)
+    public ResponseEntity<Map<String, String>> handleUnknownSource(UnknownSourceException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(Map.of("error", "UNKNOWN_SOURCE", "message", e.getMessage()));
     }
 
     /**

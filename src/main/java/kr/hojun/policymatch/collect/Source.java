@@ -1,5 +1,8 @@
 package kr.hojun.policymatch.collect;
 
+import java.util.Arrays;
+import java.util.stream.Collectors;
+
 /**
  * 데이터 출처 (D-029). policy · policy_raw · collect_run 의 source 칸에 {@link #code()} 가 들어간다.
  *
@@ -11,7 +14,10 @@ package kr.hojun.policymatch.collect;
 public enum Source {
 
     /** 온통청년 청년정책 API. V10 이전의 모든 행이 이 출처다(기본값으로 채워짐). */
-    YOUTH("youth");
+    YOUTH("youth"),
+
+    /** K-Startup 지원사업 공고 (창업진흥원, 공공데이터포털). policy_no = pbanc_sn. */
+    KSTARTUP("kstartup");
 
     private final String code;
 
@@ -22,5 +28,16 @@ public enum Source {
     /** DB 의 source 칸에 저장되는 값. */
     public String code() {
         return code;
+    }
+
+    /** 관리 API 의 ?source= 값처럼 글자로 받은 출처를 찾는다. 없으면 가능한 값을 알려 주는 예외. */
+    public static Source fromCode(String code) {
+        for (Source s : values()) {
+            if (s.code.equals(code)) {
+                return s;
+            }
+        }
+        String all = Arrays.stream(values()).map(Source::code).collect(Collectors.joining(", "));
+        throw new UnknownSourceException("모르는 출처입니다: " + code + " (가능한 값: " + all + ")");
     }
 }
