@@ -39,6 +39,10 @@ import org.springframework.stereotype.Repository;
  *  - 있으면 정책 코드에 제한없음(0013010)이나 고른 코드가 하나라도 있는 정책만 낸다.
  *  - 10/30 측정: 코드가 없는 정책 0건, 제한없음과 다른 코드가 함께 붙은 정책 0건 → 따로 다룰 경우가 없다.
  *
+ * 출처 (D-029) — 출처가 달라도 같은 SQL 로 거른다. 공고형(K-Startup 등)은 나이가 없으면 비우고(K-Startup 은 3구간 범위),
+ *  소득을 비우고, 취업 상태를 제한없음으로 두었다. 그래서 이 SQL 을 고치지 않아도 소득 판단불가 · 취업 상태 통과가 된다.
+ *  결과에 출처 코드를 붙인다.
+ *
  * 긴 글 (D-027) — support_content · extra_qualification 은 목록에서 읽지 않는다.
  *  - 지원 내용은 상세 조회(findDetail)로 정책 하나씩만 내준다.
  *  - 확인 필요(needsCheck)는 SQL 에서 참/거짓(1/0)으로 계산한다.
@@ -47,7 +51,7 @@ import org.springframework.stereotype.Repository;
 public class PolicyMatchRepository {
 
     private static final String MATCH_SQL = """
-            SELECT p.id, p.title, p.category_large, p.category_medium,
+            SELECT p.id, p.source, p.title, p.category_large, p.category_medium,
                    p.apply_period_text, p.apply_url, p.ref_url,
                    p.earn_cnd_se_cd, p.earn_etc_cn,
                    (p.extra_qualification IS NOT NULL AND TRIM(p.extra_qualification) <> '') AS needs_check,
@@ -125,7 +129,8 @@ public class PolicyMatchRepository {
                     status,
                     "0043003".equals(rs.getString("earn_cnd_se_cd")) ? earnEtc : null,
                     rs.getBoolean("needs_check"),
-                    List.of());
+                    List.of(),
+                    rs.getString("source"));
         });
         if (policies.isEmpty()) {
             return policies;

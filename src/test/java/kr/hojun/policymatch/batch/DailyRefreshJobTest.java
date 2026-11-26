@@ -14,6 +14,7 @@ import kr.hojun.policymatch.collect.Source;
 import kr.hojun.policymatch.collect.YouthApiException;
 import kr.hojun.policymatch.normalize.MassDeactivationException;
 import kr.hojun.policymatch.normalize.NormalizeResult;
+import kr.hojun.policymatch.normalize.PolicyNormalizer;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -24,7 +25,7 @@ class DailyRefreshJobTest {
 
     private static final RefreshResult OK = new RefreshResult(
             new CollectResult(3763, 38, 3763, 3763),
-            new NormalizeResult(3763, 3763, 0, 0, 0, 0, 0, 0, 0),
+            new NormalizeResult(3763, 3763, 0, 0, 0, 0, 0, 0, 0, 0),
             70);
 
     private final FakeAlertSender alert = new FakeAlertSender();
@@ -107,8 +108,8 @@ class DailyRefreshJobTest {
         private final Supplier<RefreshResult> behavior;
 
         FakeBatch(Supplier<RefreshResult> behavior) {
-            // 배치는 온통청년 수집기가 있어야 만들어진다(12/9). 이 가짜는 refresh 만 쓰므로 빈 껍데기를 넘긴다
-            super(List.of(new PolicyCollector(null, null, null, null)), null);
+            // 배치는 온통청년 수집기 · 정규화기가 있어야 만들어진다(12/9 · 12/10). 이 가짜는 refresh 만 쓰므로 빈 껍데기를 넘긴다
+            super(List.of(new PolicyCollector(null, null, null, null)), List.of(new PolicyNormalizer(null, null, null, null)));
             this.behavior = behavior;
         }
 

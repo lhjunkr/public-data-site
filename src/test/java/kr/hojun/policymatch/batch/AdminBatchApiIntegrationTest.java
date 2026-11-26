@@ -85,6 +85,13 @@ class AdminBatchApiIntegrationTest {
     }
 
     @Test
+    void 모르는_출처를_정규화하라고_하면_400() throws Exception {
+        mvc.perform(post("/api/v1/admin/normalize").param("source", "nope").header("X-Admin-Token", "test-token"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("UNKNOWN_SOURCE"));
+    }
+
+    @Test
     void 토큰_없이는_출처_수집도_실행되지_않는다() throws Exception {
         // 토큰을 먼저 확인한다. 토큰 없이는 외부 API 를 부르지 않고, 어떤 출처가 있는지도 알려 주지 않는다
         mvc.perform(post("/api/v1/admin/collect").param("source", "kstartup"))

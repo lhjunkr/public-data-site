@@ -183,8 +183,8 @@ flowchart LR
 | `POST` | `/api/v1/policies/match` | 조건에 맞는 정책 매칭 (목록, 긴 글 제외) |
 | `GET` | `/api/v1/policies/{id}` | 정책 하나의 지원 내용. 같은 IP에서 1분에 30번까지(넘으면 `429`) |
 | `POST` | `/api/v1/feedback` | 의견 보내기 (`message` 필수, `email` · `consent` 선택) |
-| `POST` | `/api/v1/admin/refresh` | 수집 → 성공하면 정규화. 매일 자동 갱신과 같은 일 (`X-Admin-Token` 필요) |
-| `POST` | `/api/v1/admin/collect` · `/normalize` | 수집 · 정규화를 따로 실행 (`X-Admin-Token` 필요). 수집은 `?source=kstartup`으로 출처를 고름(기본 `youth`, 원본만 적재). 정규화가 한 번에 끄는 정책이 상한을 넘으면 반영하지 않고 `409`, 원본을 확인한 뒤 `/normalize?force=true`로 반영 (D-019) |
+| `POST` | `/api/v1/admin/refresh` | 수집 → 성공하면 정규화. 기본(`youth`)은 매일 자동 갱신과 같은 일, `?source=kstartup`으로 출처를 고름 (`X-Admin-Token` 필요) |
+| `POST` | `/api/v1/admin/collect` · `/normalize` | 수집 · 정규화를 따로 실행 (`X-Admin-Token` 필요). 둘 다 `?source=kstartup`으로 출처를 고름(기본 `youth`). 정규화가 한 번에 끄는 정책이 상한을 넘으면 반영하지 않고 `409`, 원본을 확인한 뒤 `/normalize?force=true`로 반영 (D-019) |
 | `GET` | `/api/v1/admin/feedback?status=NEW` | 받은 의견 목록, 최근 100건 (`X-Admin-Token` 필요) |
 | `POST` | `/api/v1/admin/feedback/{id}/done` | 답장 · 처리 완료 표시, 이메일 삭제 (`X-Admin-Token` 필요) |
 
@@ -220,13 +220,14 @@ curl -X POST https://chajaga.com/api/v1/policies/match \
       "incomeStatus": "MET",
       "incomeNote": null,
       "needsCheck": true,
-      "categories": ["housing.rent"]
+      "categories": ["housing.rent"],
+      "source": "youth"
     }
   ]
 }
 ```
 
-`incomeStatus`는 `MET`(충족) / `NOT_MET`(미충족) / `UNKNOWN`(판단불가) 중 하나입니다. `categories`는 세부 칩 코드(`탭.칩`)이고, 이름은 `GET /api/v1/categories`에서 얻습니다. 입력이 잘못되면(나이 누락, 없는 시도 · 취업 상태 코드 등) `400`과 사유를 돌려줍니다.
+`incomeStatus`는 `MET`(충족) / `NOT_MET`(미충족) / `UNKNOWN`(판단불가) 중 하나입니다. `categories`는 세부 칩 코드(`탭.칩`)이고, 이름은 `GET /api/v1/categories`에서 얻습니다. `source`는 출처(`youth` 온통청년 · `kstartup` K-Startup 창업지원 공고)이고, K-Startup 공고는 원본에 소득 조건이 없어 `incomeStatus`가 늘 `UNKNOWN`입니다(화면은 소득 뱃지를 숨김). 입력이 잘못되면(나이 누락, 없는 시도 · 취업 상태 코드 등) `400`과 사유를 돌려줍니다.
 
 지원 내용 같은 긴 글은 목록에 싣지 않습니다(응답의 54%였음, D-027). 화면에서 펼칠 때 `GET /api/v1/policies/{id}`로 하나씩 받습니다.
 

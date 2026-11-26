@@ -20,6 +20,7 @@ import kr.hojun.policymatch.collect.UnknownSourceException;
 import kr.hojun.policymatch.collect.YouthApiException;
 import kr.hojun.policymatch.normalize.NormalizeResult;
 import kr.hojun.policymatch.normalize.PolicyNormalizer;
+import kr.hojun.policymatch.normalize.SourceNormalizer;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -33,7 +34,7 @@ class PolicyBatchTest {
     @Test
     void 수집이_성공하면_이어서_정규화한다() {
         FakeNormalizer normalizer = new FakeNormalizer();
-        PolicyBatch batch = new PolicyBatch(List.of(new FakeCollector(() -> COLLECTED)), normalizer);
+        PolicyBatch batch = new PolicyBatch(List.of(new FakeCollector(() -> COLLECTED)), List.of(normalizer));
 
         RefreshResult result = batch.refresh();
 
@@ -47,7 +48,7 @@ class PolicyBatchTest {
         FakeNormalizer normalizer = new FakeNormalizer();
         PolicyBatch batch = new PolicyBatch(List.of(new FakeCollector(() -> {
             throw new YouthApiException("9페이지 400");
-        })), normalizer);
+        })), List.of(normalizer));
 
         assertThrows(YouthApiException.class, batch::refresh);
         assertEquals(0, normalizer.calls.get());
@@ -63,11 +64,12 @@ class PolicyBatchTest {
             collecting.countDown();
             await(release);
             return COLLECTED;
-        }), kstartup), normalizer);
+        }), kstartup), List.of(normalizer));
 
         ExecutorService pool = Executors.newSingleThreadExecutor();
         try {
-            Future<RefreshResult> daily = pool.submit(batch::refresh);
+            // refresh 가 출처별로 겹쳐 있어(12/10) 메서드 참조 대신 람다로 쓴다. 메서드 참조는 Callable · Runnable 중 고르지 못한다
+            Future<RefreshResult> daily = pool.submit(() -> batch.refresh());
             assertTrue(collecting.await(5, TimeUnit.SECONDS), "자동 갱신이 수집 중인 상태");
 
             BatchBusyException busy = assertThrows(BatchBusyException.class, batch::normalize);
@@ -89,7 +91,7 @@ class PolicyBatchTest {
         FakeNormalizer normalizer = new FakeNormalizer();
         PolicyBatch batch = new PolicyBatch(List.of(new FakeCollector(() -> {
             throw new YouthApiException("API 응답 없음");
-        })), normalizer);
+        })), List.of(normalizer));
 
         assertThrows(YouthApiException.class, batch::collect);
 
@@ -101,7 +103,7 @@ class PolicyBatchTest {
     void 강제_정규화는_상한을_보지_않는_경로로만_간다() {
         // D-019 "12/8 추가": force=true 일 때만 상한 없이 반영한다. 기본 정규화 · 수집+정규화는 상한을 본다
         FakeNormalizer normalizer = new FakeNormalizer();
-        PolicyBatch batch = new PolicyBatch(List.of(new FakeCollector(() -> COLLECTED)), normalizer);
+        PolicyBatch batch = new PolicyBatch(List.of(new FakeCollector(() -> COLLECTED)), List.of(normalizer));
 
         batch.normalize(true);
         batch.normalize();
@@ -120,7 +122,7 @@ class PolicyBatchTest {
         PolicyBatch batch = new PolicyBatch(List.of(new FakeCollector(() -> {
             youthCalls.incrementAndGet();
             return COLLECTED;
-        }), kstartup), normalizer);
+        }), kstartup), List.of(normalizer));
 
         CollectResult result = batch.collect(Source.KSTARTUP);
 
@@ -132,7 +134,7 @@ class PolicyBatchTest {
 
     @Test
     void 수집기가_없는_출처는_거절한다() {
-        PolicyBatch batch = new PolicyBatch(List.of(new FakeCollector(() -> COLLECTED)), new FakeNormalizer());
+        PolicyBatch batch = new PolicyBatch(List.of(new FakeCollector(() -> COLLECTED)), List.of(new FakeNormalizer()));
 
         assertThrows(UnknownSourceException.class, () -> batch.collect(Source.KSTARTUP));
     }
@@ -143,14 +145,64 @@ class PolicyBatchTest {
         List<SourceCollector> twice = List.of(new FakeCollector(() -> COLLECTED),
                 new FakeSourceCollector(Source.KSTARTUP), new FakeSourceCollector(Source.KSTARTUP));
 
-        assertThrows(IllegalStateException.class, () -> new PolicyBatch(twice, new FakeNormalizer()));
+        assertThrows(IllegalStateException.class, () -> new PolicyBatch(twice, List.of(new FakeNormalizer())));
     }
 
     @Test
     void 온통청년_수집기가_없으면_앱이_뜨지_않는다() {
         // 매일 갱신(refresh)은 온통청년 수집기를 쓴다
         assertThrows(IllegalStateException.class,
-                () -> new PolicyBatch(List.of(new FakeSourceCollector(Source.KSTARTUP)), new FakeNormalizer()));
+                () -> new PolicyBatch(List.of(new FakeSourceCollector(Source.KSTARTUP)), List.of(new FakeNormalizer())));
+    }
+
+    @Test
+    void 출처를_골라_정규화하면_그_출처의_정규화기만_돈다() {
+        // 12/10: K-Startup 정규화는 온통청년 정규화를 부르지 않는다
+        FakeNormalizer youth = new FakeNormalizer();
+        FakeSourceNormalizer kstartup = new FakeSourceNormalizer(Source.KSTARTUP);
+        PolicyBatch batch = new PolicyBatch(List.of(new FakeCollector(() -> COLLECTED)), List.of(youth, kstartup));
+
+        batch.normalize(Source.KSTARTUP, false);
+        batch.normalize(Source.KSTARTUP, true);
+
+        assertEquals(1, kstartup.calls.get());
+        assertEquals(1, kstartup.forcedCalls.get());
+        assertEquals(0, youth.calls.get() + youth.forcedCalls.get());
+    }
+
+    @Test
+    void 출처의_수집_정규화는_그_출처의_것만_이어서_돈다() {
+        FakeNormalizer youth = new FakeNormalizer();
+        AtomicInteger youthCollects = new AtomicInteger();
+        FakeSourceCollector kstartupCollector = new FakeSourceCollector(Source.KSTARTUP);
+        FakeSourceNormalizer kstartupNormalizer = new FakeSourceNormalizer(Source.KSTARTUP);
+        PolicyBatch batch = new PolicyBatch(List.of(new FakeCollector(() -> {
+            youthCollects.incrementAndGet();
+            return COLLECTED;
+        }), kstartupCollector), List.of(youth, kstartupNormalizer));
+
+        RefreshResult result = batch.refresh(Source.KSTARTUP);
+
+        assertEquals(175, result.collect().itemsSeen());
+        assertEquals(1, kstartupCollector.calls.get());
+        assertEquals(1, kstartupNormalizer.calls.get());
+        assertEquals(0, youthCollects.get() + youth.calls.get());
+    }
+
+    @Test
+    void 정규화기가_없는_출처는_거절한다() {
+        PolicyBatch batch = new PolicyBatch(
+                List.of(new FakeCollector(() -> COLLECTED), new FakeSourceCollector(Source.KSTARTUP)),
+                List.of(new FakeNormalizer()));
+
+        assertThrows(UnknownSourceException.class, () -> batch.normalize(Source.KSTARTUP, false));
+        assertThrows(UnknownSourceException.class, () -> batch.refresh(Source.KSTARTUP));
+    }
+
+    @Test
+    void 온통청년_정규화기가_없으면_앱이_뜨지_않는다() {
+        assertThrows(IllegalStateException.class, () -> new PolicyBatch(
+                List.of(new FakeCollector(() -> COLLECTED)), List.of(new FakeSourceNormalizer(Source.KSTARTUP))));
     }
 
     // ---------- 가짜 ----------
@@ -199,6 +251,34 @@ class PolicyBatchTest {
         }
     }
 
+    /** 온통청년이 아닌 출처의 가짜 정규화기. 불린 횟수만 센다. */
+    private static class FakeSourceNormalizer implements SourceNormalizer {
+        final AtomicInteger calls = new AtomicInteger();
+        final AtomicInteger forcedCalls = new AtomicInteger();
+        private final Source source;
+
+        FakeSourceNormalizer(Source source) {
+            this.source = source;
+        }
+
+        @Override
+        public Source source() {
+            return source;
+        }
+
+        @Override
+        public NormalizeResult normalize() {
+            calls.incrementAndGet();
+            return new NormalizeResult(181, 181, 1700, 181, 181, 0, 0, 0, 0, 0);
+        }
+
+        @Override
+        public NormalizeResult normalizeAllowingMassDeactivation() {
+            forcedCalls.incrementAndGet();
+            return new NormalizeResult(181, 181, 1700, 181, 181, 0, 0, 0, 0, 0);
+        }
+    }
+
     /** DB 를 건드리지 않고 불린 횟수만 센다. */
     private static class FakeNormalizer extends PolicyNormalizer {
         final AtomicInteger calls = new AtomicInteger();
@@ -211,13 +291,13 @@ class PolicyBatchTest {
         @Override
         public NormalizeResult normalize() {
             calls.incrementAndGet();
-            return new NormalizeResult(3763, 3763, 0, 0, 0, 0, 0, 0, 0);
+            return new NormalizeResult(3763, 3763, 0, 0, 0, 0, 0, 0, 0, 0);
         }
 
         @Override
         public NormalizeResult normalizeAllowingMassDeactivation() {
             forcedCalls.incrementAndGet();
-            return new NormalizeResult(3763, 3763, 0, 0, 0, 0, 0, 0, 0);
+            return new NormalizeResult(3763, 3763, 0, 0, 0, 0, 0, 0, 0, 0);
         }
     }
 }

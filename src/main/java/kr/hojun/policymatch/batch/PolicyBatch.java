@@ -5,13 +5,14 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import kr.hojun.policymatch.collect.CollectResult;
 import kr.hojun.policymatch.collect.Source;
 import kr.hojun.policymatch.collect.SourceCollector;
 import kr.hojun.policymatch.collect.UnknownSourceException;
 import kr.hojun.policymatch.normalize.NormalizeResult;
-import kr.hojun.policymatch.normalize.PolicyNormalizer;
+import kr.hojun.policymatch.normalize.SourceNormalizer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -30,8 +31,9 @@ import org.springframework.stereotype.Service;
  * 잠금은 트랜잭션 바깥에서 잡고 푼다. 정규화의 트랜잭션은 normalizer.normalize() 안에서 시작해 커밋까지 끝나므로,
  * 잠금이 풀리는 시점에는 이미 커밋되어 있다. 안에서 풀면 커밋 전에 다음 작업이 시작될 수 있다.
  *
- * 수집기는 출처별로 여러 개다(12/9~, D-029). 스프링이 SourceCollector 구현 빈을 모두 넘겨 주고, 여기서 출처로 고른다.
- * 잠금은 출처와 상관없이 하나다. 출처 수집은 몇 초면 끝나고, 출처별 실행 시각은 12/16 에 따로 정한다.
+ * 수집기 · 정규화기는 출처별로 여러 개다(12/9~, D-029). 스프링이 SourceCollector · SourceNormalizer 구현 빈을 모두 넘겨 주고,
+ * 여기서 출처로 고른다. 새 출처를 붙여도 이 클래스는 고치지 않는다.
+ * 잠금은 출처와 상관없이 하나다. 출처 수집 · 정규화는 몇 초면 끝나고, 출처별 실행 시각은 12/16 에 따로 정한다.
  */
 @Service
 public class PolicyBatch {
@@ -39,27 +41,18 @@ public class PolicyBatch {
     private static final Logger log = LoggerFactory.getLogger(PolicyBatch.class);
 
     private final Map<Source, SourceCollector> collectors;
-    private final PolicyNormalizer normalizer;
+    private final Map<Source, SourceNormalizer> normalizers;
 
     /** 지금 실행 중인 작업 이름. null 이면 아무것도 돌지 않는다. */
     private final AtomicReference<String> running = new AtomicReference<>();
 
     /**
-     * 출처 하나에 수집기는 하나여야 하고, 매일 갱신이 쓰는 온통청년 수집기는 반드시 있어야 한다.
-     * 어긋나면 앱이 뜨는 순간 실패시킨다. 실행 중에 엉뚱한 수집기가 불리는 것보다 낫다.
+     * 출처 하나에 수집기 · 정규화기는 하나씩이어야 하고, 매일 갱신이 쓰는 온통청년 것은 반드시 있어야 한다.
+     * 어긋나면 앱이 뜨는 순간 실패시킨다. 실행 중에 엉뚱한 것이 불리는 것보다 낫다.
      */
-    public PolicyBatch(List<SourceCollector> collectors, PolicyNormalizer normalizer) {
-        Map<Source, SourceCollector> bySource = new EnumMap<>(Source.class);
-        for (SourceCollector c : collectors) {
-            if (bySource.put(c.source(), c) != null) {
-                throw new IllegalStateException("출처 " + c.source().code() + " 의 수집기가 둘 이상입니다.");
-            }
-        }
-        if (!bySource.containsKey(Source.YOUTH)) {
-            throw new IllegalStateException("온통청년(youth) 수집기가 없습니다. 매일 갱신을 할 수 없습니다.");
-        }
-        this.collectors = Collections.unmodifiableMap(bySource);
-        this.normalizer = normalizer;
+    public PolicyBatch(List<SourceCollector> collectors, List<SourceNormalizer> normalizers) {
+        this.collectors = bySource(collectors, SourceCollector::source, "수집기");
+        this.normalizers = bySource(normalizers, SourceNormalizer::source, "정규화기");
     }
 
     /** 온통청년 수집. 관리 API 의 /collect 기본값이다. */
@@ -73,38 +66,81 @@ public class PolicyBatch {
         if (collector == null) {
             throw new UnknownSourceException("출처 " + source.code() + " 의 수집기는 아직 없습니다.");
         }
-        String name = source == Source.YOUTH ? "수집" : "수집(" + source.code() + ")";
-        return exclusive(name, collector::collectAll);
+        return exclusive("수집" + suffix(source), collector::collectAll);
     }
 
     public NormalizeResult normalize() {
-        return normalize(false);
+        return normalize(Source.YOUTH, false);
+    }
+
+    public NormalizeResult normalize(boolean allowMassDeactivation) {
+        return normalize(Source.YOUTH, allowMassDeactivation);
     }
 
     /**
+     * 출처 하나의 원본을 검색용 표로 옮긴다.
+     *
      * @param allowMassDeactivation true 면 대량 비활성 상한을 보지 않는다(D-019 "12/8 추가").
      *        사람이 원본을 확인한 뒤 관리 API 로만 켠다. 수집+정규화(refresh)에는 이 선택지를 두지 않는다 —
      *        방금 받은, 아무도 확인하지 않은 데이터를 상한 없이 반영하게 되기 때문이다.
      */
-    public NormalizeResult normalize(boolean allowMassDeactivation) {
+    public NormalizeResult normalize(Source source, boolean allowMassDeactivation) {
+        SourceNormalizer normalizer = normalizerOf(source);
         if (allowMassDeactivation) {
-            return exclusive("정규화(강제)", normalizer::normalizeAllowingMassDeactivation);
+            return exclusive("정규화(강제)" + suffix(source), normalizer::normalizeAllowingMassDeactivation);
         }
-        return exclusive("정규화", normalizer::normalize);
+        return exclusive("정규화" + suffix(source), normalizer::normalize);
+    }
+
+    /** 매일 갱신(DailyRefreshJob)이 부르는 온통청년 수집 → 정규화. */
+    public RefreshResult refresh() {
+        return refresh(Source.YOUTH);
     }
 
     /**
-     * 온통청년 수집 → 성공했을 때만 정규화. 새 출처는 12/16 수집 스케줄 통합 때 붙인다.
+     * 수집 → 성공했을 때만 정규화. 출처 하나만 한다. 새 출처의 매일 갱신 편입은 12/16 에 한다.
      * 수집이 실패하면 예외가 그대로 나가고 정규화는 돌지 않는다. 화면은 마지막 성공 데이터를 계속 보여 준다(D-017).
      */
-    public RefreshResult refresh() {
-        return exclusive("수집+정규화", () -> {
+    public RefreshResult refresh(Source source) {
+        SourceCollector collector = collectors.get(source);
+        SourceNormalizer normalizer = normalizerOf(source);
+        if (collector == null) {
+            throw new UnknownSourceException("출처 " + source.code() + " 의 수집기는 아직 없습니다.");
+        }
+        return exclusive("수집+정규화" + suffix(source), () -> {
             long startedMs = System.currentTimeMillis();
-            CollectResult collected = collectors.get(Source.YOUTH).collectAll();
+            CollectResult collected = collector.collectAll();
             NormalizeResult normalized = normalizer.normalize();
             long elapsedSeconds = (System.currentTimeMillis() - startedMs) / 1000;
             return new RefreshResult(collected, normalized, elapsedSeconds);
         });
+    }
+
+    private SourceNormalizer normalizerOf(Source source) {
+        SourceNormalizer normalizer = normalizers.get(source);
+        if (normalizer == null) {
+            throw new UnknownSourceException("출처 " + source.code() + " 의 정규화기는 아직 없습니다.");
+        }
+        return normalizer;
+    }
+
+    /** 작업 이름 뒤에 붙일 출처. 온통청년은 이전 이름 그대로 둔다(로그 · 409 응답 문구가 바뀌지 않게). */
+    private static String suffix(Source source) {
+        return source == Source.YOUTH ? "" : "(" + source.code() + ")";
+    }
+
+    private static <T> Map<Source, T> bySource(List<T> items, Function<T, Source> sourceOf, String kind) {
+        Map<Source, T> map = new EnumMap<>(Source.class);
+        for (T item : items) {
+            Source source = sourceOf.apply(item);
+            if (map.put(source, item) != null) {
+                throw new IllegalStateException("출처 " + source.code() + " 의 " + kind + "가 둘 이상입니다.");
+            }
+        }
+        if (!map.containsKey(Source.YOUTH)) {
+            throw new IllegalStateException("온통청년(youth) " + kind + "가 없습니다. 매일 갱신을 할 수 없습니다.");
+        }
+        return Collections.unmodifiableMap(map);
     }
 
     private <T> T exclusive(String name, Supplier<T> work) {
