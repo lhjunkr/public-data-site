@@ -8,6 +8,8 @@ services:
       SPRING_DATASOURCE_USERNAME: ${SPRING_DATASOURCE_USERNAME}
       SPRING_DATASOURCE_PASSWORD: ${SPRING_DATASOURCE_PASSWORD}
       YOUTH_API_KEY: ${YOUTH_API_KEY}
+      # 공공데이터포털 일반 인증키(Decoding). K-Startup 부터 쓴다(12/9). .env 에 없으면 빈 값 → 그 출처 수집만 실패한다
+      DATA_GO_KR_KEY: ${DATA_GO_KR_KEY:-}
       ADMIN_TOKEN: ${ADMIN_TOKEN}
       # 디스코드 웹훅. .env 에 없으면 빈 값이 되어 알림이 꺼진다 (D-026)
       ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}

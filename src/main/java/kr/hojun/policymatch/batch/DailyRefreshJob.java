@@ -66,10 +66,12 @@ public class DailyRefreshJob {
     /**
      * 알림은 외부(디스코드)로 나가므로 원인 설명을 그대로 보내지 않는다.
      * 연결 오류 메시지에는 요청 주소가 통째로 들어 있어 온통청년 인증키(apiKeyNm=…)가 섞인다. 그 값을 가리고 길이를 줄인다.
+     * 공공데이터포털 키(serviceKey=…)는 DataGoKrClient 가 예외를 만들 때 이미 가리지만, 12/16 매일 갱신에 붙기 전에 여기서도 한 번 더 가린다.
      */
     static String summary(RuntimeException e) {
         String text = e.getClass().getSimpleName() + ": " + e.getMessage();
         text = text.replaceAll("apiKeyNm=[^&\"\\s]+", "apiKeyNm=***");
+        text = text.replaceAll("serviceKey=[^&\"\\s]+", "serviceKey=***");
         return text.length() <= SUMMARY_MAX ? text : text.substring(0, SUMMARY_MAX) + "…";
     }
 }
