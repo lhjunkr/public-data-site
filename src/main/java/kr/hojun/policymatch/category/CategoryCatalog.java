@@ -40,7 +40,8 @@ public class CategoryCatalog {
                 if (!chipCodes.add(code)) {
                     throw new IllegalStateException("칩 코드가 중복됐습니다: " + code);
                 }
-                for (String medium : chip.mediums()) {
+                // 정규화기가 직접 붙이는 칩(예: housing.public, 12/12)은 원본 중분류가 없다. YAML 의 빈 목록이 null 로 와도 받는다
+                for (String medium : chip.mediums() == null ? List.<String>of() : chip.mediums()) {
                     String previous = byMedium.put(key(medium), code);
                     if (previous != null) {
                         throw new IllegalStateException(

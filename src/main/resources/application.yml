@@ -24,6 +24,10 @@ category:
         - code: house
           name: 주택
           mediums: [주택 및 거주지, 기숙사]
+        # 마이홈 공공주택 모집공고 전용 칩 (12/12, 사용자 결정). 온통청년 중분류는 넣지 않는다 — 정규화기가 직접 붙인다
+        - code: public
+          name: 공공임대·분양
+          mediums: []
     - code: welfare
       name: 금융·복지
       open: true

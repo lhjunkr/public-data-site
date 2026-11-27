@@ -259,7 +259,7 @@ ORDER BY p.view_count DESC, p.id
 | `apply_start_date` · `apply_end_date` | `aplyYmd` 해석 | `pbanc_rcpt_bgng_dt` · `…end_dt` | `beginDe` · `endDe` | `pbancBgngYmd` · `pbancEndYmd` | `PUB_DATE` · `PUB_END_DATE` |
 | `min_age` · `max_age` | 원본 값 | 3구간을 합친 범위 | 비움 | 비움 | 비움 |
 | `policy_sido` | `zipCd` 앞 2자리 | `supt_regin` (`전국` → 16개, `sido.regions` 설정) | `brtcNm` (지역별 행) | `workRgnNmLst` (여러 값) | `SIDO_CD` |
-| `policy_category` | 중분류 → 칩 (D-018) | `jobs.startup` | `housing.house` 주거 · 주택 (12/11) | 공공기관 채용 탭 · 고용형태 칩 (12/15) | 같음 |
+| `policy_category` | 중분류 → 칩 (D-018) | `jobs.startup` | `housing.public` 주거 · 공공임대·분양 (12/12, 12/11엔 `housing.house`) | 공공기관 채용 탭 · 고용형태 칩 (12/15) | 같음 |
 | `policy_job` | `jobCd` | `0013010` | `0013010` | `0013010` | `0013010` |
 | `extra_qualification` | 원문 | `aply_trgt_ctnt` | 고정 문구(자격은 공고문 확인) | `aplyQlfcCn` | 자격증 칸 |
 | 그 밖의 값 | 글 칸 · 원본 | 원본 | 공급유형 · 주택유형 · 임대료 → `support_content` | 고용형태 · 학력 · 인원 → `support_content` | 고용형태 · 직급 · 연봉 → `support_content` |
@@ -287,7 +287,7 @@ ORDER BY p.view_count DESC, p.id
 |---|---|---|
 | 같은 소스 안 | `(source, policy_no)` upsert | 몇 번 수집해도 행이 늘지 않는다 |
 | 마이홈 정정공고 | `beforePblancId`가 가리키는 이전 공고를 비활성 | 정정 81행 중 77행은 이전 공고도 함께 응답에 있다 |
-| 마이홈 ↔ LH 공고문 | 마이홈 `url`의 `panId` = LH `PAN_ID`이면 같은 공고 (12/11 측정 후) | 마이홈 418행 중 405행의 `url`에 `panId`가 있다 |
+| 마이홈 ↔ LH 공고문 | **LH를 붙이지 않는다** (12/12 측정) | LH 주택 공고 105건 중 98건(93%)이 마이홈 `url`의 `panId`와 같고, 마이홈에 없는 입주자 모집 공고는 0건 ([`sources/lh.md`](sources/lh.md)) |
 | 잡알리오 ↔ 지방공공기관 | 합치지 않음 | 기관 이름 겹침 0 |
 | 온통청년 ↔ K-Startup | 마감 전 활성 온통청년 정책의 주소가 K-Startup 공고 번호(`pbancSn`)를 가리킬 때만 K-Startup 쪽을 싣지 않음 (12/10) | 같은 번호면 같은 공고다. 그 밖에는 제도와 회차 공고라 둘 다 보인다 |
 | 그 밖 | **제목이 비슷하다고 합치지 않는다** | 잘못 합치면 공고가 사라진다. 빠뜨리는 것이 더 나쁘다 (D-001 · D-003) |
