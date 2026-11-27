@@ -66,6 +66,24 @@ public class PolicyStore {
                 """, String.class, source.code(), source.code());
     }
 
+    /**
+     * rawSinceLastSuccess 와 같은 원본을 번호와 함께 돌려준다 (12/11).
+     * 마이홈은 임대 · 분양 구분이 원본 안이 아니라 번호 접두어(rent- · sale-)에 있어 번호가 필요하다.
+     */
+    public List<RawRow> rawRowsSinceLastSuccess(Source source) {
+        return jdbc.query("""
+                SELECT policy_no, raw_json FROM policy_raw
+                WHERE source = ?
+                  AND fetched_at >= (SELECT MAX(started_at) FROM collect_run
+                                     WHERE source = ? AND status = 'SUCCESS')
+                ORDER BY policy_no
+                """, (rs, i) -> new RawRow(rs.getString("policy_no"), rs.getString("raw_json")),
+                source.code(), source.code());
+    }
+
+    /** 원본 한 행: 번호와 원본 JSON 글자. */
+    public record RawRow(String policyNo, String rawJson) {}
+
     /** 한 행을 넣거나 덮어쓰고, 그 행의 id 를 돌려준다. 다시 나타난 정책은 active = TRUE 로 돌아온다. */
     public long upsert(Source source, PolicyRow r) {
         jdbc.update(UPSERT_POLICY,
