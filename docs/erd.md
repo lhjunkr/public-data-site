@@ -259,11 +259,12 @@ ORDER BY p.view_count DESC, p.id
 | `apply_start_date` · `apply_end_date` | `aplyYmd` 해석 | `pbanc_rcpt_bgng_dt` · `…end_dt` | `beginDe` · `endDe` | `pbancBgngYmd` · `pbancEndYmd` | `PUB_DATE` · `PUB_END_DATE` |
 | `min_age` · `max_age` | 원본 값 | 3구간을 합친 범위 | 비움 | 비움 | 비움 |
 | `policy_sido` | `zipCd` 앞 2자리 | `supt_regin` (`전국` → 16개, `sido.regions` 설정) | `brtcNm` (지역별 행) | `workRgnNmLst` (여러 값) | `SIDO_CD` |
-| `policy_category` | 중분류 → 칩 (D-018) | `jobs.startup` | 주거 탭 공고 칩 (12/11) | 공공기관 채용 탭 · 고용형태 칩 (12/15) | 같음 |
+| `policy_category` | 중분류 → 칩 (D-018) | `jobs.startup` | `housing.house` 주거 · 주택 (12/11) | 공공기관 채용 탭 · 고용형태 칩 (12/15) | 같음 |
 | `policy_job` | `jobCd` | `0013010` | `0013010` | `0013010` | `0013010` |
 | `extra_qualification` | 원문 | `aply_trgt_ctnt` | 고정 문구(자격은 공고문 확인) | `aplyQlfcCn` | 자격증 칸 |
 | 그 밖의 값 | 글 칸 · 원본 | 원본 | 공급유형 · 주택유형 · 임대료 → `support_content` | 고용형태 · 학력 · 인원 → `support_content` | 고용형태 · 직급 · 연봉 → `support_content` |
 
+- **마이홈 원본 묶기 (12/11):** 응답 한 행은 (공고, 주택, 지역)이다. 전 페이지를 받은 뒤 (공고, 주택)으로 묶어 `policy_raw` 한 행(`rent-{pblancId}-{houseSn}`)에 지역 행 배열을 담는다. 행마다 넣으면 유니크 키 때문에 마지막 지역만 남는다. `policy_sido`는 지역 행들의 `brtcNm` 합집합, 시군구 · 공급 호수는 `support_content`에만 둔다.
 - **K-Startup 나이 3구간 → 범위:** 고른 구간을 합친다. 실측 175건: 세 구간 모두(= 비움) 115 · 20~ 36 · 20~39 18 · ~39 4 · 40~ 1 · ~19 1.
 - **`policy_job`에 `0013010`(제한없음):** 공고형은 취업 상태 조건이 없으므로, 지금 매칭 SQL(`job_code IN ('0013010', :job)`)을 바꾸지 않고 통과시킨다.
 - **소득:** 새 소스는 소득 칸이 비어 매칭 SQL이 '판단불가'를 낸다 → 화면이 `source`를 보고 소득 표시를 숨긴다.

@@ -17,7 +17,10 @@ public enum Source {
     YOUTH("youth"),
 
     /** K-Startup 지원사업 공고 (창업진흥원, 공공데이터포털). policy_no = pbanc_sn. */
-    KSTARTUP("kstartup");
+    KSTARTUP("kstartup"),
+
+    /** 마이홈 공공주택 모집공고 (국토교통부, 공공데이터포털). policy_no = rent-{pblancId}-{houseSn} · sale-{pblancId}-{houseSn}. */
+    MYHOME("myhome");
 
     private final String code;
 

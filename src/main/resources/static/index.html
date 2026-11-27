@@ -304,6 +304,7 @@
 <footer>
   <p>정책 정보 출처: <a href="https://www.youthcenter.go.kr" target="_blank" rel="noopener noreferrer">온통청년</a> 청년정책 Open API (국무조정실 · 한국고용정보원)</p>
   <p>창업지원 공고 출처: <a href="https://www.k-startup.go.kr" target="_blank" rel="noopener noreferrer">K-Startup</a> 사업공고 조회서비스 (창업진흥원 · 공공데이터포털)</p>
+  <p>공공주택 모집공고 출처: <a href="https://www.myhome.go.kr" target="_blank" rel="noopener noreferrer">마이홈</a> 공공주택 모집공고 조회 서비스 (국토교통부 · 공공데이터포털)</p>
   <p id="updated"></p>
   <p>비영리 개인 프로젝트입니다. 정책 정보는 매일 새벽 원본에서 다시 받아 오며, 원본과 다를 수 있습니다.</p>
   <p><a href="/privacy.html"><strong>개인정보 처리방침</strong></a> · 문의 <a href="mailto:lhj020701@gmail.com">lhj020701@gmail.com</a></p>
@@ -572,7 +573,8 @@
   // 온통청년 정책은 따로 적지 않는다(하단 출처). 다른 출처의 공고는 카드에 출처를 적고,
   // 원본에 소득 조건이 없으므로 소득 뱃지를 숨긴다("판단불가"가 모든 공고에 붙어 헷갈리지 않게).
   const SOURCE_LABEL = {
-    kstartup: "출처: K-Startup 창업지원 공고"
+    kstartup: "출처: K-Startup 창업지원 공고",
+    myhome: "출처: 마이홈 공공주택 모집공고"
   };
 
   function isYouth(policy) {
