@@ -2,8 +2,8 @@
 # 새 데이터원 4개의 응답 원본을 표본으로 받는다 (12/5 필드 분포 측정용).
 # 받은 파일은 samples/ 에 두고 리포에는 올리지 않는다(.gitignore). 분석 결과만 docs/sources/*.md 에 남긴다.
 #
-# 사용: 리포 폴더에서  bash scripts/fetch-samples.sh [kstartup] [myhome] [alio] [local]
-#   소스를 적지 않으면 4개 모두. 적으면 그 소스만 다시 받는다. local-probe(요청 형식 시험)는 적었을 때만 돈다.
+# 사용: 리포 폴더에서  bash scripts/fetch-samples.sh [kstartup] [myhome] [alio] [local] [lh]
+#   소스를 적지 않으면 4개 모두. 적으면 그 소스만 다시 받는다. local-probe(요청 형식 시험) · lh(LH 공고문, 12/12 겹침 측정)는 적었을 때만 돈다.
 #   공공데이터포털 "일반 인증키"(Decoding 값)를 물어본다. 입력은 화면 · 셸 기록에 남지 않는다.
 #   키는 curl 이 URL 인코딩한다 → Encoding 값을 넣으면 두 번 인코딩되어 SERVICE_KEY_IS_NOT_REGISTERED.
 #
@@ -26,6 +26,7 @@ KS=https://apis.data.go.kr/B552735/kisedKstartupService02
 MH=https://apis.data.go.kr/1613000/HWSPR02
 AL=https://apis.data.go.kr/1051000/recruitment
 LC=https://apis.data.go.kr/B551982/openApiEmployInfo
+LH=https://apis.data.go.kr/B552555/lhLeaseNoticeInfo1
 
 # fetch 저장파일 주소 이름=값...
 #   값은 curl 이 URL 인코딩한다. 이미 %로 인코딩해 둔 항목(이름에 [ ] 가 있는 조건)은 그대로 붙인다.
@@ -106,6 +107,24 @@ echo "== 지방공공기관 채용 (시도별)"
 for n in 001 002 003 004 005 006 007 008 009 010 011 012 013 014 015 016 017 018 019 020; do
   fetch "$OUT/local/sido-007$n.xml" "$LC/openXmlEmployInfo" sidoCd="007$n" type=xml
 done
+fi
+
+if explicit lh; then
+echo "== LH 분양임대공고문 (12/12: 마이홈과 겹치는 비율 측정용)"
+# 공고 상태로 나눠 받는다. 마이홈은 접수가 끝나지 않은 공고만 주므로 '공고중' · '접수중'과 비교한다.
+#   한 번에 최대 1,000건(PG_SZ). 형식을 모르는 첫 호출이라 10건짜리 probe 도 따로 남긴다.
+mkdir -p "$OUT/lh"
+fetch "$OUT/lh/probe.json" "$LH/lhLeaseNoticeInfo1" PG_SZ=10 PAGE=1
+fetch "$OUT/lh/notice-open.json" "$LH/lhLeaseNoticeInfo1" PG_SZ=1000 PAGE=1 PAN_SS=공고중
+fetch "$OUT/lh/notice-receiving.json" "$LH/lhLeaseNoticeInfo1" PG_SZ=1000 PAGE=1 PAN_SS=접수중
+# 11/27 확인: 기간을 안 주면 '오늘부터 2개월 전'까지 게시된 공고만 온다(응답 dsSch 의 PAN_ST_DT ~ PAN_ED_DT).
+#   마이홈에는 2025년에 게시된 잔여세대 · 선착순 공고도 있어 게시일 2023-01-01 부터 넓혀 다시 받는다.
+WIDE_FROM=20230101
+TODAY=$(date +%Y%m%d)
+fetch "$OUT/lh/notice-open-wide.json" "$LH/lhLeaseNoticeInfo1" PG_SZ=1000 PAGE=1 PAN_SS=공고중 \
+  PAN_ST_DT=$WIDE_FROM PAN_ED_DT=$TODAY
+fetch "$OUT/lh/notice-receiving-wide.json" "$LH/lhLeaseNoticeInfo1" PG_SZ=1000 PAGE=1 PAN_SS=접수중 \
+  PAN_ST_DT=$WIDE_FROM PAN_ED_DT=$TODAY
 fi
 
 if explicit local-probe; then

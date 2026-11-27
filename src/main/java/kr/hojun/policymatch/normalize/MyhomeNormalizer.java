@@ -4,9 +4,12 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 import kr.hojun.policymatch.category.CategoryCatalog;
@@ -28,15 +31,19 @@ import tools.jackson.databind.ObjectMapper;
  * 원본 한 행 = (공고, 주택) 하나이고, raw_json 은 그 주택의 지역 행 배열이다(MyhomeCollector).
  *
  * 칸 옮기기 (docs/erd.md "소스별로 칸에 넣는 값")
- *  - 제목 pblancNm · 기관 suplyInsttNm · 모집 시작/마감 beginDe/endDe · 신청 주소 url
+ *  - 제목 pblancNm · 기관 suplyInsttNm · 모집 시작/마감 beginDe/endDe
+ *  - 신청 주소 url(LH 청약센터 등 공급 기관 페이지) · 참고 주소 pcUrl(마이홈 공고 상세, 12/12)
  *  - 지역: 지역 행마다 brtcNm(시도 정식 이름) → 시도 코드(SidoNames), 합집합을 policy_sido 로.
  *    시군구(signguNm)는 매칭에 쓰지 않고(D-027 시도 단위) 지원 내용의 "공급 지역"에 남긴다
  *  - 공급 유형: suplyTyNm(국민임대 · 행복주택 …, 임대만) → category_medium. 분양은 "공공분양"
- *  - 분류: 칩은 주거 · 주택(housing.house) 하나. 공급 유형별 칩은 만들지 않는다(탭당 칩 3개 규칙, 화면 편입은 12/12)
+ *  - 분류: 칩은 주거 · 공공임대·분양(housing.public) 하나(12/12, 사용자 결정). 12/11 에는 주거 · 주택 칩에 두었는데,
+ *    조회수가 없어 온통청년 주거 정책 뒤에 묻혀 전용 칩으로 옮겼다. 공급 유형별 칩은 만들지 않는다(탭당 칩 3개 규칙)
  *  - 나이 · 소득: 원본에 없다(자격은 공고문 PDF). 비워서 지금 매칭 SQL 이 통과시키고, 자격은 '확인 필요'로 둔다(D-001 · D-003)
  *  - 취업 상태: 제한없음(0013010) 한 줄
- *  - 임대료 · 보증금(rentGtn · mtRntchrg)은 아직 싣지 않는다. 단위(원 · 천원)를 실제 공고와 맞춰 보기 전이라,
- *    틀린 금액을 보여 주는 것보다 빼는 편이 낫다. 화면 편입(12/12)에서 확인 후 넣는다
+ *  - 금액(12/12): 임대는 보증금 rentGtn(= 계약금 enty + 잔금 surlus) · 월 임대료 mtRntchrg, 분양은 계약금 enty · 중도금 prtpay ·
+ *    잔금 surlus 를 '원'으로 싣는다. 단위는 원본 안의 관계로 판단했다(명세 미확인): 11/27 원본에서 보증금이 있는 233행 중
+ *    226행이 보증금 = 계약금 + 중도금 + 잔금과 정확히 같고, 월 임대료가 3만 ~ 56.9만이라 원 단위일 때만 말이 된다. 어느 주택형(면적)의 값인지는 원본에 없어 '공고문 확인' 안내를 붙인다.
+ *    지역 행마다 값이 다르면 숫자 대신 '지역마다 다름'으로 적는다. 0 이나 빈 값은 싣지 않는다
  *
  * 정정공고 (D-029 ⑤ "같은 식별자가 있을 때만")
  *  - 어떤 공고의 beforePblancId 가 다른 공고의 pblancId 를 가리키면, 가리켜진 쪽은 고치기 전 공고다. 싣지 않고 duplicates 로 센다.
@@ -53,9 +60,15 @@ public class MyhomeNormalizer implements SourceNormalizer {
     private static final Logger log = LoggerFactory.getLogger(MyhomeNormalizer.class);
     private static final Source SOURCE = Source.MYHOME;
 
-    /** 화면 칩: 주거 탭 · 주택 칩 (application.yml 의 category.tabs) */
-    static final String CHIP = "housing.house";
+    /** 화면 칩: 주거 탭 · 공공임대·분양 칩 (application.yml 의 category.tabs, 12/12) */
+    static final String CHIP = "housing.public";
     static final String CATEGORY_LARGE = "주거";
+
+    /** 금액 아래에 붙이는 안내. 원본에는 어느 주택형의 금액인지가 없다. */
+    static final String AMOUNT_NOTICE = "금액은 마이홈이 제공하는 값이며, 주택형(면적)에 따라 다를 수 있으니 모집공고문에서 확인하십시오.";
+
+    /** 단지명 · 주소를 몇 개까지 적을지. 전세임대 · 매입임대는 지역 행이 최대 16개라 다 적으면 길어진다. */
+    static final int MAX_LISTED = 3;
 
     /** extra_qualification 고정 문구. 비어 있지 않으므로 화면에 '추가 자격 확인 필요'가 뜬다(D-003). */
     static final String QUALIFICATION_NOTICE =
@@ -119,6 +132,11 @@ public class MyhomeNormalizer implements SourceNormalizer {
             units.add(unit);
         }
         Set<String> superseded = supersededPosts(units);
+        // 한 공고에 주택(단지)이 여럿이면 제목이 같은 카드가 여러 장 나온다(11/27: 320건 중 239건). 그 경우만 제목에 단지명을 붙인다
+        Map<String, Integer> unitsPerPost = new HashMap<>();
+        for (Unit unit : units) {
+            unitsPerPost.merge(postKey(unit.kind(), unit.pblancId()), 1, Integer::sum);
+        }
         log.info("마이홈 정규화 후보 {}건 · 정정공고가 가리키는 이전 공고 {}개", units.size(), superseded.size());
 
         int policies = 0, sidoLinks = 0, jobLinks = 0, categoryLinks = 0, noRegion = 0, duplicates = 0;
@@ -149,7 +167,8 @@ public class MyhomeNormalizer implements SourceNormalizer {
 
             int[] links;
             try {
-                long policyId = store.upsert(SOURCE, toRow(unit));
+                boolean sharedTitle = unitsPerPost.getOrDefault(postKey(unit.kind(), unit.pblancId()), 1) > 1;
+                long policyId = store.upsert(SOURCE, toRow(unit, sharedTitle));
                 links = new int[] {
                         store.syncLinks("policy_sido", "sido", policyId, sidos),
                         store.syncLinks("policy_job", "job_code", policyId, Set.of(JobStatus.UNLIMITED_CODE)),
@@ -246,8 +265,12 @@ public class MyhomeNormalizer implements SourceNormalizer {
         return kind.prefix() + ":" + pblancId;
     }
 
-    /** (공고, 주택) 하나를 policy 행 값으로 바꾼다. 공고 공통 칸은 첫 지역 행에서 읽는다. */
-    PolicyRow toRow(Unit unit) {
+    /**
+     * (공고, 주택) 하나를 policy 행 값으로 바꾼다. 공고 공통 칸은 첫 지역 행에서 읽는다.
+     *
+     * @param sharedTitle 같은 공고에 주택이 둘 이상이라 제목이 겹치면 true → 제목 뒤에 " · 단지명"을 붙인다(12/12)
+     */
+    PolicyRow toRow(Unit unit, boolean sharedTitle) {
         JsonNode first = unit.rows().get(0);
         String startText = digits(text(first, "beginDe"));
         String endText = digits(text(first, "endDe"));
@@ -264,7 +287,7 @@ public class MyhomeNormalizer implements SourceNormalizer {
 
         return new PolicyRow(
                 unit.policyNo(),
-                TextCleaner.clean(text(first, "pblancNm")),
+                title(unit, sharedTitle),
                 CATEGORY_LARGE,
                 supplyType(unit),
                 null,
@@ -281,9 +304,23 @@ public class MyhomeNormalizer implements SourceNormalizer {
                 start,
                 end,
                 httpUrl(text(first, "url")),
-                null,
+                httpUrl(text(first, "pcUrl")),
                 TextCleaner.clean(text(first, "suplyInsttNm")),
                 null);
+    }
+
+    /** 제목 칸 길이(VARCHAR 255). 단지명을 붙여 넘으면 자른다. */
+    static final int TITLE_MAX = 255;
+
+    /** 공고명. 제목이 다른 주택과 겹치고 단지명이 있으면 " · 단지명"을 붙인다. */
+    String title(Unit unit, boolean sharedTitle) {
+        String name = TextCleaner.clean(text(unit.rows().get(0), "pblancNm"));
+        String complex = TextCleaner.clean(text(unit.rows().get(0), "hsmpNm"));
+        if (name == null || !sharedTitle || complex == null) {
+            return name;
+        }
+        String titled = name + " · " + complex;
+        return titled.length() <= TITLE_MAX ? titled : titled.substring(0, TITLE_MAX);
     }
 
     /** 공급 유형: 임대는 suplyTyNm(국민임대 · 행복주택 …), 없으면 구분 이름(공공임대 · 공공분양). */
@@ -303,8 +340,12 @@ public class MyhomeNormalizer implements SourceNormalizer {
         line(out, "구분", unit.kind().label());
         line(out, "공급 유형", supplyType(unit));
         line(out, "주택 유형", distinct(unit, "houseTyNm"));
+        line(out, "단지명", listed(unit, "hsmpNm"));
+        line(out, "주소", listed(unit, "fullAdres"));
         line(out, "공고 상태", distinct(unit, "sttusNm"));
         line(out, "공급 기관", text(first, "suplyInsttNm"));
+        line(out, "모집공고일", dotted(text(first, "rcritPblancDe")));
+        line(out, "당첨자 발표일", dotted(text(first, "przwnerPresnatnDe")));
 
         Integer total = 0;
         List<String> regions = new ArrayList<>();
@@ -313,6 +354,9 @@ public class MyhomeNormalizer implements SourceNormalizer {
             String signgu = TextCleaner.clean(text(row, "signguNm"));
             String place = brtc == null ? "(지역 없음)" : (signgu == null ? brtc + " 전체" : brtc + " " + signgu);
             Integer count = number(text(row, "sumSuplyCo"));
+            if (count != null && count == 0) {
+                count = null; // 11/27: 지역 행 84개가 0 이다(전세임대 · 매입임대). "0호"는 '공급 없음'으로 읽혀 싣지 않는다
+            }
             if (count == null) {
                 total = null;
             } else if (total != null) {
@@ -326,11 +370,112 @@ public class MyhomeNormalizer implements SourceNormalizer {
         if (total != null && total > 0) {
             line(out, "공급 호수", "합계 " + total + "호");
         }
+        if (appendAmounts(out, unit)) {
+            line(out, "금액 안내", AMOUNT_NOTICE);
+        }
         out.append('\n').append("[공급 지역]\n");
-        for (String r : regions) {
-            out.append(r).append('\n');
+        if (allSidosWhole(unit)) {
+            // 전세임대 · 다자녀 · 신혼 전세처럼 16개 시도 '전체'가 한 줄씩 오는 공고(11/27 서울 마이홈 13건 중 4건). 16줄 대신 한 줄로
+            out.append("전국 (").append(sidoNames.allCodes().size()).append("개 시도 전체)\n");
+        } else {
+            for (String r : regions) {
+                out.append(r).append('\n');
+            }
         }
         return out.toString().strip();
+    }
+
+    /**
+     * 금액 줄을 붙이고, 하나라도 붙였으면 true. 임대: 보증금(계약금 · 잔금) · 월 임대료 / 분양: 계약금 · 중도금 · 잔금.
+     */
+    private boolean appendAmounts(StringBuilder out, Unit unit) {
+        int before = out.length();
+        if (unit.kind() == Kind.RENT) {
+            Long deposit = amountValue(unit, "rentGtn");
+            if (deposit != null) {
+                // 계약금 + 중도금 + 잔금 = 보증금일 때만 내역을 붙인다. 11/27 원본: 보증금이 있는 233행 중 226행이 정확히 맞고
+                // 7행은 안 맞았다. 안 맞는 내역을 같이 보여 주면 어느 쪽이 맞는지 사용자가 헷갈린다
+                Long enty = amountValue(unit, "enty");
+                Long prtpay = amountValue(unit, "prtpay");
+                Long surlus = amountValue(unit, "surlus");
+                boolean adds = deposit > 0 && enty != null && enty > 0 && surlus != null && surlus > 0
+                        && (prtpay == null || prtpay > 0)
+                        && enty + (prtpay == null ? 0 : prtpay) + surlus == deposit;
+                String parts = adds ? " (계약금 " + won(enty) + (prtpay == null ? "" : " · 중도금 " + won(prtpay))
+                        + " · 잔금 " + won(surlus) + ")" : "";
+                line(out, "임대보증금", won(deposit) + parts);
+            }
+            line(out, "월 임대료", won(amountValue(unit, "mtRntchrg")));
+        } else {
+            line(out, "계약금", won(amountValue(unit, "enty")));
+            line(out, "중도금", won(amountValue(unit, "prtpay")));
+            line(out, "잔금", won(amountValue(unit, "surlus")));
+        }
+        return out.length() > before;
+    }
+
+    /** 지역 행마다 금액이 다를 때의 표시값. 실제 금액은 0보다 크므로 겹치지 않는다. */
+    static final long DIFFERENT = -1L;
+
+    /** 한 금액 칸의 값(원). 지역 행마다 다르면 DIFFERENT, 0 · 빈 값뿐이면 null. */
+    private Long amountValue(Unit unit, String field) {
+        Set<Long> values = new LinkedHashSet<>();
+        for (JsonNode row : unit.rows()) {
+            String t = text(row, field);
+            if (t != null && t.strip().matches("\\d{1,15}")) {
+                long v = Long.parseLong(t.strip());
+                if (v > 0) {
+                    values.add(v);
+                }
+            }
+        }
+        if (values.isEmpty()) {
+            return null;
+        }
+        return values.size() == 1 ? values.iterator().next() : DIFFERENT;
+    }
+
+    /** 13192000 → "13,192,000원". 지역마다 다르면 "지역마다 다름", 값이 없으면 null(줄을 싣지 않음). */
+    static String won(Long value) {
+        if (value == null) {
+            return null;
+        }
+        return value == DIFFERENT ? "지역마다 다름" : String.format(Locale.ROOT, "%,d원", value);
+    }
+
+    /** 서로 다른 값을 MAX_LISTED 개까지 적고, 더 있으면 "외 n곳"을 붙인다. */
+    private String listed(Unit unit, String field) {
+        Set<String> values = new LinkedHashSet<>();
+        for (JsonNode row : unit.rows()) {
+            String v = TextCleaner.clean(text(row, field));
+            if (v != null) {
+                values.add(v);
+            }
+        }
+        if (values.isEmpty()) {
+            return null;
+        }
+        List<String> shown = new ArrayList<>(values).subList(0, Math.min(MAX_LISTED, values.size()));
+        String joined = String.join(", ", shown);
+        return values.size() > MAX_LISTED ? joined + " 외 " + (values.size() - MAX_LISTED) + "곳" : joined;
+    }
+
+    /** 20261124 → 2026.11.24. 형식이 다르면 그대로. */
+    static String dotted(String yyyymmdd) {
+        String d = digits(yyyymmdd);
+        return d != null && d.matches("\\d{8}") ? d.substring(0, 4) + "." + d.substring(4, 6) + "." + d.substring(6) : yyyymmdd;
+    }
+
+    /** 모든 지역 행이 시군구 없는 '시도 전체'이고, 그 시도들이 설정의 시도를 모두 덮으면 true. */
+    private boolean allSidosWhole(Unit unit) {
+        Set<String> codes = new LinkedHashSet<>();
+        for (JsonNode row : unit.rows()) {
+            if (TextCleaner.clean(text(row, "signguNm")) != null) {
+                return false;
+            }
+            codes.addAll(sidoNames.codesOf(TextCleaner.clean(text(row, "brtcNm"))));
+        }
+        return codes.containsAll(sidoNames.allCodes());
     }
 
     /** 지역 행들에서 한 칸의 서로 다른 값을 순서대로 이어 붙인다. 보통 하나다. */

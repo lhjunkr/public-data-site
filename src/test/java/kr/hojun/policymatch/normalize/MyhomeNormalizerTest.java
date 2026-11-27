@@ -63,6 +63,9 @@ class MyhomeNormalizerTest {
         gangnam.put("sumSuplyCo", 3);
         gangnam.put("beginDe", "20261201");
         gangnam.put("endDe", "20261210");
+        gangnam.put("hsmpNm", "서울시 전세임대");
+        gangnam.put("rcritPblancDe", "20261124");
+        gangnam.put("przwnerPresnatnDe", "20261231");
         Map<String, Object> seocho = copy(gangnam, "서울특별시", "서초구");
         seocho.put("sumSuplyCo", 2);
         Map<String, Object> seongnam = copy(gangnam, "경기도", "성남시");
@@ -83,8 +86,10 @@ class MyhomeNormalizerTest {
         assertEquals("20261201 ~ 20261210", p.get("apply_period_text"));
         assertEquals("2026-12-01", String.valueOf(p.get("apply_start_date")));
         assertEquals("2026-12-10", String.valueOf(p.get("apply_end_date")));
-        assertEquals("https://www.myhome.go.kr/hws/portal/sch/selectRsdtRcritNtcDetailView.do?pblancId=T-MN-1",
-                p.get("apply_url"));
+        assertEquals("https://apply.lh.or.kr/lhapply/apply/wt/wrtanc/selectWrtancInfo.do?panId=T-MN-1", p.get("apply_url"),
+                "신청하기 = 공급 기관(LH 청약센터) 페이지");
+        assertEquals("https://www.myhome.go.kr/hws/portal/sch/selectRsdtRcritNtcDetailView.do?pblancId=T-MN-1&houseSn=1",
+                p.get("ref_url"), "참고 링크 = 마이홈 공고 상세(12/12)");
         assertEquals("한국토지주택공사", p.get("supervising_org"));
         assertEquals(MyhomeNormalizer.QUALIFICATION_NOTICE, p.get("extra_qualification"), "확인 필요 뱃지(D-003)");
 
@@ -94,11 +99,14 @@ class MyhomeNormalizerTest {
         assertTrue(support.contains("공급 호수: 합계 10호"), support);
         assertTrue(support.contains("서울특별시 강남구 · 3호"), support);
         assertTrue(support.contains("경기도 성남시 · 5호"), support);
+        assertTrue(support.contains("단지명: 서울시 전세임대"), support);
+        assertTrue(support.contains("모집공고일: 2026.11.24"), support);
+        assertTrue(support.contains("당첨자 발표일: 2026.12.31"), support);
 
         long id = idOf("rent-T-MN-1-1");
         assertEquals(Set.of("11", "41"), links("policy_sido", "sido", id), "지역 행 3개 → 시도 2개");
         assertEquals(Set.of("0013010"), links("policy_job", "job_code", id), "취업 상태 제한없음");
-        assertEquals(Set.of("housing.house"), links("policy_category", "category_code", id), "주거 · 주택 칩");
+        assertEquals(Set.of("housing.public"), links("policy_category", "category_code", id), "주거 · 공공임대·분양 칩(12/12)");
     }
 
     @Test
@@ -142,7 +150,7 @@ class MyhomeNormalizerTest {
         assertEquals("myhome", found.get().source());
         assertEquals(IncomeStatus.UNKNOWN, found.get().incomeStatus());
         assertTrue(found.get().needsCheck(), "자격은 공고문 확인");
-        assertTrue(found.get().categories().contains("housing.house"));
+        assertTrue(found.get().categories().contains("housing.public"));
 
         assertTrue(find(matchRepository.match(25, "11", 3000L, "0013003"), "rent-T-MN-6-1").isPresent(),
                 "연소득 · 취업 상태를 넣어도 빠지지 않는다");
@@ -261,18 +269,163 @@ class MyhomeNormalizerTest {
     }
 
     @Test
-    void 지원_내용에_신청자_개인정보나_금액을_싣지_않는다() {
-        // 임대료 단위(원 · 천원)는 12/12 에 실제 공고와 맞춰 본 뒤 싣는다
-        Map<String, Object> r = row("T-MN-17", "서울특별시", "");
-        r.put("rentGtn", 12345);
-        r.put("mtRntchrg", 678);
+    void 임대_금액을_원_단위로_싣고_공고문_확인_안내를_붙인다() {
+        // 11/27 원본: 보증금이 있는 233행 중 226행이 보증금 = 계약금 + 잔금, 월 임대료 3만 ~ 56.9만 → 원 단위로 판단(12/12)
+        Map<String, Object> r = row("T-MN-17", "전북특별자치도", "완주군");
+        r.put("rentGtn", 13192000);
+        r.put("enty", 500000);
+        r.put("prtpay", 0);
+        r.put("surlus", 12692000);
+        r.put("mtRntchrg", 68150);
         insertRaw("rent-T-MN-17-1", List.of(r), AT);
 
         normalizer.normalize();
 
         String support = (String) policy("rent-T-MN-17-1").get("support_content");
-        assertFalse(support.contains("12345"), support);
-        assertFalse(support.contains("678"), support);
+        assertTrue(support.contains("임대보증금: 13,192,000원 (계약금 500,000원 · 잔금 12,692,000원)"), support);
+        assertTrue(support.contains("월 임대료: 68,150원"), support);
+        assertTrue(support.contains("금액 안내: " + MyhomeNormalizer.AMOUNT_NOTICE), support);
+    }
+
+    @Test
+    void 계약금과_잔금의_합이_보증금과_다르면_내역을_붙이지_않는다() {
+        // 11/27 원본: 보증금이 있는 233행 중 7행은 계약금 + 잔금이 보증금과 달랐다
+        Map<String, Object> r = row("T-MN-22", "경기도", "이천시");
+        r.put("rentGtn", 27508000);
+        r.put("enty", 1375000);
+        r.put("surlus", 26132600);
+        insertRaw("rent-T-MN-22-1", List.of(r), AT);
+
+        normalizer.normalize();
+
+        String support = (String) policy("rent-T-MN-22-1").get("support_content");
+        assertTrue(support.contains("임대보증금: 27,508,000원\n"), support);
+        assertFalse(support.contains("계약금"), support);
+    }
+
+    @Test
+    void 분양_금액은_계약금_중도금_잔금으로_싣고_0은_뺀다() {
+        Map<String, Object> r = row("T-MN-18", "경기도", "화성시");
+        r.remove("suplyTyNm");
+        r.put("enty", 10000000);
+        r.put("prtpay", 0);
+        r.put("surlus", 113265000);
+        insertRaw("sale-T-MN-18-1", List.of(r), AT);
+
+        normalizer.normalize();
+
+        String support = (String) policy("sale-T-MN-18-1").get("support_content");
+        assertTrue(support.contains("계약금: 10,000,000원"), support);
+        assertTrue(support.contains("잔금: 113,265,000원"), support);
+        assertFalse(support.contains("중도금"), "0 원은 싣지 않는다");
+        assertFalse(support.contains("임대보증금"), "분양에는 보증금 줄이 없다");
+    }
+
+    @Test
+    void 지역_행마다_금액이_다르면_숫자_대신_지역마다_다름으로_적는다() {
+        Map<String, Object> a = row("T-MN-19", "서울특별시", "강남구");
+        a.put("mtRntchrg", 100000);
+        Map<String, Object> b = copy(a, "서울특별시", "서초구");
+        b.put("mtRntchrg", 120000);
+        insertRaw("rent-T-MN-19-1", List.of(a, b), AT);
+
+        normalizer.normalize();
+
+        String support = (String) policy("rent-T-MN-19-1").get("support_content");
+        assertTrue(support.contains("월 임대료: 지역마다 다름"), support);
+        assertFalse(support.contains("100,000원"), support);
+    }
+
+    @Test
+    void 금액이_모두_0이면_금액_줄과_안내를_싣지_않는다() {
+        Map<String, Object> r = row("T-MN-20", "서울특별시", "");
+        r.put("rentGtn", 0);
+        r.put("mtRntchrg", 0);
+        r.put("refrnc", "LH 콜센터 : 1600-1004");
+        insertRaw("rent-T-MN-20-1", List.of(r), AT);
+
+        normalizer.normalize();
+
+        String support = (String) policy("rent-T-MN-20-1").get("support_content");
+        assertFalse(support.contains("임대보증금"), support);
+        assertFalse(support.contains("금액 안내"), support);
+        assertFalse(support.contains("1600-1004"), "연락처 칸(refrnc)은 싣지 않는다");
+    }
+
+    @Test
+    void 같은_공고의_주택이_여럿이면_제목에_단지명을_붙인다() {
+        // 11/27: 320건 중 239건이 다른 주택과 제목이 같았다. 카드 목록에서 구분되지 않는다
+        Map<String, Object> a = row("T-MN-23", "서울특별시", "중랑구");
+        a.put("pblancNm", "2026년 서울특별시 영구임대주택 예비입주자 모집");
+        a.put("hsmpNm", "양원S1");
+        Map<String, Object> b = new LinkedHashMap<>(a);
+        b.put("houseSn", 2);
+        b.put("hsmpNm", "대방");
+        insertRaw("rent-T-MN-23-1", List.of(a), AT);
+        insertRaw("rent-T-MN-23-2", List.of(b), AT);
+        Map<String, Object> single = row("T-MN-24", "서울특별시", "");
+        single.put("hsmpNm", "혼자단지");
+        insertRaw("rent-T-MN-24-1", List.of(single), AT);
+
+        normalizer.normalize();
+
+        assertEquals("2026년 서울특별시 영구임대주택 예비입주자 모집 · 양원S1", policy("rent-T-MN-23-1").get("title"));
+        assertEquals("2026년 서울특별시 영구임대주택 예비입주자 모집 · 대방", policy("rent-T-MN-23-2").get("title"));
+        assertEquals("시험 모집공고 T-MN-24", policy("rent-T-MN-24-1").get("title"), "주택이 하나뿐인 공고는 그대로");
+    }
+
+    @Test
+    void 공급_호수가_0이면_호수를_적지_않는다() {
+        Map<String, Object> r = row("T-MN-25", "대구광역시", "");
+        r.put("sumSuplyCo", 0);
+        insertRaw("rent-T-MN-25-1", List.of(r), AT);
+
+        normalizer.normalize();
+
+        String support = (String) policy("rent-T-MN-25-1").get("support_content");
+        assertTrue(support.contains("대구광역시 전체\n") || support.endsWith("대구광역시 전체"), support);
+        assertFalse(support.contains("0호"), support);
+        assertFalse(support.contains("공급 호수"), support);
+    }
+
+    @Test
+    void 열여섯_개_시도_전체에_걸친_공고는_공급_지역을_전국_한_줄로_적는다() {
+        List<String> sidos = List.of("서울특별시", "전남광주통합특별시", "부산광역시", "대구광역시", "인천광역시", "대전광역시",
+                "울산광역시", "세종특별자치시", "경기도", "충청북도", "충청남도", "경상북도", "경상남도", "제주특별자치도",
+                "강원특별자치도", "전북특별자치도");
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (String sido : sidos) {
+            Map<String, Object> r = row("T-MN-26", sido, "");
+            r.put("suplyTyNm", "전세임대");
+            rows.add(r);
+        }
+        insertRaw("rent-T-MN-26-1", rows, AT);
+        Map<String, Object> partial = row("T-MN-27", "서울특별시", "");
+        insertRaw("rent-T-MN-27-1", List.of(partial, copy(partial, "경기도", "")), AT);
+
+        normalizer.normalize();
+
+        String all = (String) policy("rent-T-MN-26-1").get("support_content");
+        assertTrue(all.endsWith("[공급 지역]\n전국 (16개 시도 전체)"), all);
+        assertEquals(16, links("policy_sido", "sido", idOf("rent-T-MN-26-1")).size(), "검색용 시도 연결은 그대로 16개");
+        String two = (String) policy("rent-T-MN-27-1").get("support_content");
+        assertTrue(two.contains("서울특별시 전체\n경기도 전체"), "일부 시도만이면 한 줄씩 적는다: " + two);
+    }
+
+    @Test
+    void 단지명이_많으면_세_개까지_적고_나머지는_외_몇_곳으로_줄인다() {
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (String name : List.of("가단지", "나단지", "다단지", "라단지", "마단지")) {
+            Map<String, Object> r = row("T-MN-21", "경기도", name);
+            r.put("hsmpNm", name);
+            rows.add(r);
+        }
+        insertRaw("rent-T-MN-21-1", rows, AT);
+
+        normalizer.normalize();
+
+        String support = (String) policy("rent-T-MN-21-1").get("support_content");
+        assertTrue(support.contains("단지명: 가단지, 나단지, 다단지 외 2곳"), support);
     }
 
     // ---------- 도우미 ----------
@@ -291,7 +444,9 @@ class MyhomeNormalizerTest {
         r.put("signguNm", signgu);
         r.put("beginDe", LocalDate.now().minusDays(1).format(YYYYMMDD));
         r.put("endDe", LocalDate.now().plusDays(30).format(YYYYMMDD));
-        r.put("url", "https://www.myhome.go.kr/hws/portal/sch/selectRsdtRcritNtcDetailView.do?pblancId=" + pblancId);
+        r.put("url", "https://apply.lh.or.kr/lhapply/apply/wt/wrtanc/selectWrtancInfo.do?panId=" + pblancId);
+        r.put("pcUrl", "https://www.myhome.go.kr/hws/portal/sch/selectRsdtRcritNtcDetailView.do?pblancId=" + pblancId
+                + "&houseSn=1");
         return r;
     }
 

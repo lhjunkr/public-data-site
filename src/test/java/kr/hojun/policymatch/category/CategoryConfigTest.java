@@ -49,4 +49,16 @@ class CategoryConfigTest {
                 .andExpect(jsonPath("$[3].code").value("participation"))
                 .andExpect(jsonPath("$[4].code").value("jobs"));
     }
+
+    @Test
+    void 주거_탭의_세_번째_칩은_마이홈_공공임대_분양이다() throws Exception {
+        // 12/12: 원본 중분류가 없는 칩(mediums: [])도 앱이 뜨고 화면 API 에 나온다
+        MockMvc mvc = MockMvcBuilders.webAppContextSetup(context).build();
+
+        mvc.perform(get("/api/v1/categories"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].chips.length()").value(3))
+                .andExpect(jsonPath("$[0].chips[2].code").value("housing.public"))
+                .andExpect(jsonPath("$[0].chips[2].name").value("공공임대·분양"));
+    }
 }
