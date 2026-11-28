@@ -259,12 +259,13 @@ ORDER BY p.view_count DESC, p.id
 | `apply_start_date` · `apply_end_date` | `aplyYmd` 해석 | `pbanc_rcpt_bgng_dt` · `…end_dt` | `beginDe` · `endDe` | `pbancBgngYmd` · `pbancEndYmd` | `PUB_DATE` · `PUB_END_DATE` |
 | `min_age` · `max_age` | 원본 값 | 3구간을 합친 범위 | 비움 | 비움 | 비움 |
 | `policy_sido` | `zipCd` 앞 2자리 | `supt_regin` (`전국` → 16개, `sido.regions` 설정) | `brtcNm` (지역별 행) | `workRgnNmLst` (여러 값) | `SIDO_CD` |
-| `policy_category` | 중분류 → 칩 (D-018) | `jobs.startup` | `housing.public` 주거 · 공공임대·분양 (12/12, 12/11엔 `housing.house`) | 공공기관 채용 탭 · 고용형태 칩 (12/15) | 같음 |
+| `policy_category` | 중분류 → 칩 (D-018) | `jobs.startup` | `housing.public` 주거 · 공공임대·분양 (12/12, 12/11엔 `housing.house`) | `recruit` 탭(12/15까지 닫힘): 고용형태 → `recruit.regular` · `indefinite` · `intern` · `contract` + 신입 가능 `recruit.entry` (12/13) | 같은 탭 · 고용형태 이름만 설정에 추가 (12/14) |
 | `policy_job` | `jobCd` | `0013010` | `0013010` | `0013010` | `0013010` |
 | `extra_qualification` | 원문 | `aply_trgt_ctnt` | 고정 문구(자격은 공고문 확인) | `aplyQlfcCn` | 자격증 칸 |
-| 그 밖의 값 | 글 칸 · 원본 | 원본 | 공급유형 · 주택유형 · 임대료 → `support_content` | 고용형태 · 학력 · 인원 → `support_content` | 고용형태 · 직급 · 연봉 → `support_content` |
+| 그 밖의 값 | 글 칸 · 원본 | 원본 | 공급유형 · 주택유형 · 임대료 → `support_content` | 고용형태 · 채용 구분 · 근무지 · 인원 · 학력 · 직무 · 대체인력 → `support_content` · 우대 사항 → `etc_matters` · 전형 안내(연락처 섞임)는 원본에만 | 고용형태 · 직급 · 연봉 → `support_content` |
 
 - **마이홈 원본 묶기 (12/11):** 응답 한 행은 (공고, 주택, 지역)이다. 전 페이지를 받은 뒤 (공고, 주택)으로 묶어 `policy_raw` 한 행(`rent-{pblancId}-{houseSn}`)에 지역 행 배열을 담는다. 행마다 넣으면 유니크 키 때문에 마지막 지역만 남는다. `policy_sido`는 지역 행들의 `brtcNm` 합집합, 시군구 · 공급 호수는 `support_content`에만 둔다.
+- **잡알리오 (12/13):** 응답 한 건 = 공고 한 건이라 묶지 않는다. 고용형태 · 근무지는 콤마 여러 값 → 칩 · 시도 연결 여러 개. 원본 고용형태 이름 → 칩은 `application.yml`의 `recruit` 탭 `mediums`, 채용 구분에 '신입'이 있으면 `recruit.entry`. 신청하기 = 잡알리오 원문(`recruitview.do?idx={recrutPblntSn}`), 참고 링크 = 기관 채용 페이지(`srcUrl`). 마감 2050년 이후 = 상시. 11/28 로컬: 577건 · 시도 연결 774 · 칩 연결 1,153 · 지역/칩 없음 0.
 - **K-Startup 나이 3구간 → 범위:** 고른 구간을 합친다. 실측 175건: 세 구간 모두(= 비움) 115 · 20~ 36 · 20~39 18 · ~39 4 · 40~ 1 · ~19 1.
 - **`policy_job`에 `0013010`(제한없음):** 공고형은 취업 상태 조건이 없으므로, 지금 매칭 SQL(`job_code IN ('0013010', :job)`)을 바꾸지 않고 통과시킨다.
 - **소득:** 새 소스는 소득 칸이 비어 매칭 SQL이 '판단불가'를 낸다 → 화면이 `source`를 보고 소득 표시를 숨긴다.

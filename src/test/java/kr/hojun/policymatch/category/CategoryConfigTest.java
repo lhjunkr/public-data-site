@@ -1,5 +1,6 @@
 package kr.hojun.policymatch.category;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -48,6 +49,22 @@ class CategoryConfigTest {
                 .andExpect(jsonPath("$.length()").value(5))            // D-021 로 일자리까지 5개 모두 열림
                 .andExpect(jsonPath("$[3].code").value("participation"))
                 .andExpect(jsonPath("$[4].code").value("jobs"));
+    }
+
+    @Test
+    void 공공기관_채용_탭은_화면_편입_전까지_닫혀_있고_칩은_있다() throws Exception {
+        // 12/13: 잡알리오 데이터부터 넣는다. 탭이 닫혀 있으면 분류 API 와 매칭 결과에 나오지 않는다(12/15 에 연다)
+        assertTrue(catalog.allChipCodes().containsAll(List.of(
+                "recruit.regular", "recruit.indefinite", "recruit.intern", "recruit.contract", "recruit.entry")));
+        assertTrue(catalog.openChipCodes().stream().noneMatch(code -> code.startsWith("recruit.")));
+        assertEquals(List.of("recruit.intern"), List.copyOf(catalog.chipsOf("청년인턴(체험형),청년인턴(채용형)")),
+                "체험형 · 채용형은 같은 청년인턴 칩");
+
+        MockMvc mvc = MockMvcBuilders.webAppContextSetup(context).build();
+        mvc.perform(get("/api/v1/categories"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(5))
+                .andExpect(jsonPath("$[?(@.code == 'recruit')]").isEmpty());
     }
 
     @Test

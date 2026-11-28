@@ -183,8 +183,8 @@ flowchart LR
 | `POST` | `/api/v1/policies/match` | 조건에 맞는 정책 매칭 (목록, 긴 글 제외) |
 | `GET` | `/api/v1/policies/{id}` | 정책 하나의 지원 내용. 같은 IP에서 1분에 30번까지(넘으면 `429`) |
 | `POST` | `/api/v1/feedback` | 의견 보내기 (`message` 필수, `email` · `consent` 선택) |
-| `POST` | `/api/v1/admin/refresh` | 수집 → 성공하면 정규화. 기본(`youth`)은 매일 자동 갱신과 같은 일, `?source=kstartup` · `?source=myhome`으로 출처를 고름 (`X-Admin-Token` 필요) |
-| `POST` | `/api/v1/admin/collect` · `/normalize` | 수집 · 정규화를 따로 실행 (`X-Admin-Token` 필요). 둘 다 `?source=kstartup` · `?source=myhome`으로 출처를 고름(기본 `youth`). 정규화가 한 번에 끄는 정책이 상한을 넘으면 반영하지 않고 `409`, 원본을 확인한 뒤 `/normalize?force=true`로 반영 (D-019) |
+| `POST` | `/api/v1/admin/refresh` | 수집 → 성공하면 정규화. 기본(`youth`)은 매일 자동 갱신과 같은 일, `?source=kstartup` · `?source=myhome` · `?source=alio`로 출처를 고름 (`X-Admin-Token` 필요) |
+| `POST` | `/api/v1/admin/collect` · `/normalize` | 수집 · 정규화를 따로 실행 (`X-Admin-Token` 필요). 둘 다 `?source=kstartup` · `?source=myhome` · `?source=alio`로 출처를 고름(기본 `youth`). 잡알리오 공고는 공공기관 채용 탭을 여는 12/15 전까지 검색 결과에 나오지 않음. 정규화가 한 번에 끄는 정책이 상한을 넘으면 반영하지 않고 `409`, 원본을 확인한 뒤 `/normalize?force=true`로 반영 (D-019) |
 | `GET` | `/api/v1/admin/feedback?status=NEW` | 받은 의견 목록, 최근 100건 (`X-Admin-Token` 필요) |
 | `POST` | `/api/v1/admin/feedback/{id}/done` | 답장 · 처리 완료 표시, 이메일 삭제 (`X-Admin-Token` 필요) |
 
