@@ -13,10 +13,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import kr.hojun.policymatch.category.CategoryCatalog;
-import kr.hojun.policymatch.category.CategoryProperties;
-import kr.hojun.policymatch.category.CategoryProperties.Chip;
-import kr.hojun.policymatch.category.CategoryProperties.Tab;
 import kr.hojun.policymatch.match.IncomeStatus;
 import kr.hojun.policymatch.match.MatchedPolicy;
 import kr.hojun.policymatch.match.PolicyMatchRepository;
@@ -25,7 +21,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
 
@@ -44,7 +39,6 @@ class CleaneyeNormalizerTest {
     private static final String LATER = "2099-01-03 00:00:00";
 
     @Autowired JdbcTemplate jdbc;
-    @Autowired NamedParameterJdbcTemplate namedJdbc;
     @Autowired ObjectMapper objectMapper;
     @Autowired CleaneyeNormalizer normalizer;
     @Autowired PolicyMatchRepository matchRepository;
@@ -185,28 +179,30 @@ class CleaneyeNormalizerTest {
     }
 
     @Test
-    void 공공기관_채용_탭이_닫혀_있는_동안은_검색에_나오지_않는다() {
-        insertRaw(row("T-CN-15", "기관G", "공고G", "기간제", "신입", "서울특별시"), AT);
+    void 경력만_뽑는_기간제_공고도_비정규직_칩으로_검색에_나온다() {
+        // 12/15: 칩 5개 한 줄(D-018 의 예외). 칩을 3개로 줄였다면 이 공고는 열린 칩이 없어 결과에서 빠진다
+        insertRaw(row("T-CN-15", "기관G", "공고G", "기간제", "경력", "서울특별시"), AT);
         normalizer.normalize();
 
-        assertTrue(find(matchRepository.match(25, "11", null, null), "T-CN-15").isEmpty());
+        Optional<MatchedPolicy> found = find(matchRepository.match(25, "11", null, null), "T-CN-15");
+        assertTrue(found.isPresent());
+        assertEquals(List.of("recruit.contract"), found.get().categories());
     }
 
     @Test
-    void 탭을_열면_이십오세_서울_검색에_나오고_자격_조건이_없으면_확인_필요가_없다() {
+    void 이십오세_서울_검색에_나오고_자격_조건이_없으면_확인_필요가_없다() {
         insertRaw(row("T-CN-16", "기관H", "공고H", "일반정규직", "신입", "서울특별시"), AT);
         insertRaw(row("T-CN-17", "기관I", "공고I", "기간제", "신입", "부산광역시"), AT);
         normalizer.normalize();
-        PolicyMatchRepository opened = new PolicyMatchRepository(namedJdbc, recruitOpenCatalog());
 
-        Optional<MatchedPolicy> found = find(opened.match(25, "11", 3000L, "0013003"), "T-CN-16");
+        Optional<MatchedPolicy> found = find(matchRepository.match(25, "11", 3000L, "0013003"), "T-CN-16");
         assertTrue(found.isPresent(), "나이 · 소득 · 취업 상태로 빠지지 않는다");
         assertEquals("cleaneye", found.get().source());
         assertEquals(IncomeStatus.UNKNOWN, found.get().incomeStatus());
         assertFalse(found.get().needsCheck(), "지역 제한 · 자격증이 없으면 '확인 필요'가 없다");
         assertTrue(found.get().categories().containsAll(List.of("recruit.regular", "recruit.entry")));
-        assertTrue(find(opened.match(25, "11", null, null), "T-CN-17").isEmpty(), "부산 공고는 서울에 안 나온다");
-        assertTrue(find(opened.match(25, "26", null, null), "T-CN-17").isPresent());
+        assertTrue(find(matchRepository.match(25, "11", null, null), "T-CN-17").isEmpty(), "부산 공고는 서울에 안 나온다");
+        assertTrue(find(matchRepository.match(25, "26", null, null), "T-CN-17").isPresent());
     }
 
     @Test
@@ -314,15 +310,6 @@ class CleaneyeNormalizerTest {
         raw.put("URL", "https://job.cleaneye.go.kr/user/ypCareersData.do?idx=" + no);
         raw.put("NO", no);
         return raw;
-    }
-
-    /** 12/15 에 공공기관 채용 탭을 열었을 때의 묶음표. 이 시험에 필요한 칩만 넣는다 */
-    private static CategoryCatalog recruitOpenCatalog() {
-        return new CategoryCatalog(new CategoryProperties(List.of(
-                new Tab("recruit", "공공기관 채용", true, List.of(
-                        new Chip("regular", "정규직", List.of("정규직", "일반정규직")),
-                        new Chip("contract", "비정규직", List.of("비정규직", "기간제")),
-                        new Chip("entry", "신입 가능", List.of()))))));
     }
 
     private void insertRaw(Map<String, String> raw, String fetchedAt) {
