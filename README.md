@@ -18,7 +18,7 @@
 |---|---|
 | 정책 | 약 4,000건. 지역 연결 21만 행을 시도 단위 1만 5천 행으로 줄여 매칭 |
 | 예: 25세 · 서울 | 476건으로 좁힘 (2026-11-22) |
-| 운영 | 2026-09-15 공개 · 매일 04:10 자동 갱신 · 실패 알림 · DB 백업 · `main` 머지 = 자동 배포 |
+| 운영 | 2026-09-15 공개 · 매일 새벽 출처별 자동 갱신(04:10 ~ 04:32) · 실패 알림 · DB 백업 · `main` 머지 = 자동 배포 |
 | 기록 | 설계 결정 D-001 ~ D-029 · 테스트 139개 (실제 MySQL로 경계값 · 정규화 · API 확인) |
 
 기능 · 수치 · 사건 · 결정 전체는 한 장 요약 [`docs/project-summary.md`](docs/project-summary.md)에 있습니다.
@@ -72,7 +72,7 @@
 | 기계가 판단할 수 없는 추가 조건이 있다 | 해석하지 않고 "추가 자격 확인 필요"로 표시합니다 | D-001, D-003 |
 | 취업 상태 코드의 뜻을 모른다 | 공식 코드표로 확인한 뒤에야 조건으로 넣었습니다(그전까지는 보류) | D-012 → D-021 |
 | 분류가 뒤섞여 있다 | 실제 분포로 묶음표를 만들어 6개 탭 · 세부 칩으로 나눕니다 (공공기관 채용 탭은 고용형태 · 신입 가능 칩 5개) | D-018 |
-| 정책은 매일 바뀐다 | 매일 04:10 수집 → 성공했을 때만 정규화합니다 | D-020 |
+| 정책은 매일 바뀐다 | 매일 새벽 출처마다 시각을 나눠(04:10 ~ 04:32) 수집 → 성공했을 때만 정규화합니다. 한 출처가 실패해도 나머지는 돕니다 | D-020 |
 | 원본 API가 불안정하다 | 같은 요청을 다시 시도하고, 수집이 실패한 날은 마지막으로 성공한 데이터를 그대로 보여 주며 디스코드로 알립니다 | D-017, D-022, D-026 |
 | 검색이 느렸다 (1.17초, 동시 처리량 초당 1.37건) | 측정으로 병목(지역 확인 93%)을 찾아 시도 단위 표 · 긴 글 분리 · 응답 압축 순으로 고쳤습니다 → 0.35초, 초당 10.5건 | D-027 |
 
@@ -101,7 +101,7 @@ flowchart LR
     subgraph oci ["Oracle Cloud 도쿄 · 같은 VCN"]
         subgraph appvm ["policy-app VM (1GB)"]
             caddy["Caddy<br/>HTTPS · 인증서 자동 갱신 · gzip"]
-            app["Spring Boot 컨테이너<br/>정적 화면 + REST API<br/>매일 04:10 갱신"]
+            app["Spring Boot 컨테이너<br/>정적 화면 + REST API<br/>매일 04:10 ~ 04:32 출처별 갱신"]
             copy[("DB 백업 사본 7일치")]
         end
         subgraph dbvm ["policy-db VM (1GB)"]
@@ -163,7 +163,7 @@ flowchart LR
 | 언어 · 프레임워크 | Java 21, Spring Boot 4.1 |
 | 데이터 | MySQL 8.4, Flyway(V1~V10), JdbcTemplate · NamedParameterJdbcTemplate(조회 · 적재), JPA(스키마 검증) |
 | 외부 연동 | RestClient (온통청년 Open API, 타임아웃 · 재시도) |
-| 예약 작업 | `@Scheduled` (매일 04:10 갱신, 04:30 이메일 보관 기간 정리) |
+| 예약 작업 | `SchedulingConfigurer` 출처별 갱신(`batch.crons.*`, 04:10 ~ 04:32) · `@Scheduled` 04:30 이메일 보관 기간 정리 |
 | 화면 | 정적 HTML + `fetch` (`src/main/resources/static/index.html`) |
 | 테스트 | JUnit 5 · MockMvc, 실제 MySQL로 매칭 경계값 · 정규화 · 수집 · 의견 · 요청 제한 · 대량 변경 감지 등 139개 |
 | 배포 | Docker, Docker Compose, Caddy 2(HTTPS · 응답 압축), Oracle Cloud VM 2대 |
@@ -257,7 +257,7 @@ docker compose up -d
 | `YOUTH_API_KEY` | 온통청년 Open API 인증키 |
 | `ADMIN_TOKEN` | 관리용 엔드포인트(수집 · 정규화 · 의견 관리)를 보호하는 임의의 문자열 |
 
-앱이 뜨면 Flyway가 표를 만듭니다. 처음에는 데이터가 비어 있으므로 갱신을 한 번 실행합니다. 이후에는 매일 04:10에 자동으로 돕니다.
+앱이 뜨면 Flyway가 표를 만듭니다. 처음에는 데이터가 비어 있으므로 갱신을 한 번 실행합니다. 이후에는 매일 새벽 출처마다 정해진 시각(`batch.crons.*`)에 자동으로 돕니다.
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/admin/refresh -H "X-Admin-Token: <ADMIN_TOKEN 값>"

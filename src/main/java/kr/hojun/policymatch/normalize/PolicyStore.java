@@ -155,10 +155,15 @@ public class PolicyStore {
         return n == null ? 0 : n;
     }
 
-    /** deactivateOthers 가 비활성으로 바꿀 행 수. 바꾸지 않고 세기만 한다. */
+    /**
+     * deactivateOthers 가 비활성으로 바꿀 행 중 마감 전인 것(마감일이 없거나 오늘 이후)의 수. 바꾸지 않고 세기만 한다.
+     * 대량 비활성 상한(MassDeactivationGuard)이 이 수를 본다. 마감일이 지나 응답에서 빠진 공고는 정상적으로 사라진 것이라
+     * 세지 않는다(D-019 "12/16 추가"). 오늘(DB 시간대 +09:00 = 한국 날짜)이 마감인 공고는 아직 신청할 수 있으므로 센다.
+     */
     public int countToDeactivate(Source source, List<String> selectedNos) {
         Integer n = jdbc.queryForObject(
-                "SELECT COUNT(*) FROM policy WHERE source = ? AND active = TRUE AND policy_no NOT IN ("
+                "SELECT COUNT(*) FROM policy WHERE source = ? AND active = TRUE"
+                        + " AND (apply_end_date IS NULL OR apply_end_date >= CURDATE()) AND policy_no NOT IN ("
                         + placeholders(selectedNos) + ")",
                 Integer.class, sourceAnd(source, selectedNos));
         return n == null ? 0 : n;

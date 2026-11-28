@@ -14,24 +14,31 @@ import java.util.stream.Collectors;
 public enum Source {
 
     /** 온통청년 청년정책 API. V10 이전의 모든 행이 이 출처다(기본값으로 채워짐). */
-    YOUTH("youth"),
+    YOUTH("youth", "온통청년"),
 
     /** K-Startup 지원사업 공고 (창업진흥원, 공공데이터포털). policy_no = pbanc_sn. */
-    KSTARTUP("kstartup"),
+    KSTARTUP("kstartup", "K-Startup"),
 
     /** 마이홈 공공주택 모집공고 (국토교통부, 공공데이터포털). policy_no = rent-{pblancId}-{houseSn} · sale-{pblancId}-{houseSn}. */
-    MYHOME("myhome"),
+    MYHOME("myhome", "마이홈"),
 
     /** 잡알리오 공공기관 채용정보 (재정경제부, 공공데이터포털). policy_no = recrutPblntSn. */
-    ALIO("alio"),
+    ALIO("alio", "잡알리오"),
 
     /** 지방공공기관 채용정보 (행정안전부 클린아이, 공공데이터포털). policy_no = NO (직급 · 직무별 행 번호). */
-    CLEANEYE("cleaneye");
+    CLEANEYE("cleaneye", "지방공공기관");
 
     private final String code;
+    private final String label;
 
-    Source(String code) {
+    Source(String code, String label) {
         this.code = code;
+        this.label = label;
+    }
+
+    /** 사람이 읽는 이름. 운영 알림 · 로그에 쓴다(12/16). */
+    public String label() {
+        return label;
     }
 
     /** DB 의 source 칸에 저장되는 값. */
