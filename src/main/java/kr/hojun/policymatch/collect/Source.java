@@ -23,7 +23,10 @@ public enum Source {
     MYHOME("myhome"),
 
     /** 잡알리오 공공기관 채용정보 (재정경제부, 공공데이터포털). policy_no = recrutPblntSn. */
-    ALIO("alio");
+    ALIO("alio"),
+
+    /** 지방공공기관 채용정보 (행정안전부 클린아이, 공공데이터포털). policy_no = NO (직급 · 직무별 행 번호). */
+    CLEANEYE("cleaneye");
 
     private final String code;
 

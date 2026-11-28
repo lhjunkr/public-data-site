@@ -9,7 +9,7 @@ package kr.hojun.policymatch.normalize;
  * @param jobLinks      policy_job 에 연결된 행 수
  * @param categoryLinks policy_category 에 연결된 행 수 (D-018)
  * @param uncategorized 묶음표에 맞는 칩이 하나도 없는 정책 수. 결과에 나오지 않는다 (D-018)
- * @param skipped       정책번호가 없어 건너뛴 건수
+ * @param skipped       정책번호가 없거나 싣지 않기로 한 행이라 건너뛴 건수 (지방공공기관 비상임 임원 공모, 12/14)
  * @param failed        DB 에 넣다가 실패해 건너뛴 정책 수 (예: 값이 칸보다 김). 원인은 서버 로그 (D-019)
  * @param deactivated   이번 실행에서 규칙에서 빠져 비활성(active = FALSE)으로 바뀐 건수
  * @param duplicates    다른 출처에 같은 공고(같은 식별자)가 있어 싣지 않은 건수 (D-029 ⑤, 12/10). 온통청년은 늘 0

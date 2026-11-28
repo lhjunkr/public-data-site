@@ -59,6 +59,11 @@ class CategoryConfigTest {
         assertTrue(catalog.openChipCodes().stream().noneMatch(code -> code.startsWith("recruit.")));
         assertEquals(List.of("recruit.intern"), List.copyOf(catalog.chipsOf("청년인턴(체험형),청년인턴(채용형)")),
                 "체험형 · 채용형은 같은 청년인턴 칩");
+        // 12/14: 지방공공기관의 다른 이름도 같은 칩으로 모인다
+        assertEquals(List.of("recruit.regular"), List.copyOf(catalog.chipsOf("일반정규직")));
+        assertEquals(List.of("recruit.contract"), List.copyOf(catalog.chipsOf("기간제,일반계약직,전문계약직")));
+        assertEquals(List.of("recruit.intern"), List.copyOf(catalog.chipsOf("인턴")));
+        assertTrue(catalog.chipsOf("비상임").isEmpty(), "비상임(임원 공모)은 칩이 없다 — 정규화기가 싣지 않는다");
 
         MockMvc mvc = MockMvcBuilders.webAppContextSetup(context).build();
         mvc.perform(get("/api/v1/categories"))

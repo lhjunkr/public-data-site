@@ -75,7 +75,8 @@ category:
           name: 재직자·권익
           mediums: [재직자, 권익보호]
     # 공공기관 채용 (12/13 잡알리오 데이터부터 넣고, 12/15 화면 편입 때 연다). 닫힌 탭의 칩만 가진 공고는 결과에 나오지 않는다(D-018).
-    #  - 고용형태 칩: mediums 는 원본 고용형태 이름(잡알리오 hireTypeNmLst). 12/14 지방공공기관 이름(일반정규직 · 기간제 등)도 여기에 더한다.
+    #  - 고용형태 칩: mediums 는 원본 고용형태 이름. 잡알리오 hireTypeNmLst(12/13) · 지방공공기관 JOB_TYPE(12/14)을 같은 칩으로 모은다.
+    #    지방공공기관 '비상임'(임원 공모)은 정규화기가 싣지 않는다(CleaneyeNormalizer).
     #  - entry 는 채용 구분에 '신입'이 있는 공고(신입 · 신입+경력)에 정규화기가 직접 붙인다. 원본 이름 매핑이 없다.
     #  - 칩이 5개라 D-018(탭당 3개)을 넘는다. 화면에 어떤 칩을 어떻게 보일지는 12/15에 정한다(10/30: 분류는 사용자가 나눈다).
     - code: recruit
@@ -84,16 +85,16 @@ category:
       chips:
         - code: regular
           name: 정규직
-          mediums: [정규직]
+          mediums: [정규직, 일반정규직]
         - code: indefinite
           name: 무기계약직
           mediums: [무기계약직]
         - code: intern
           name: 청년인턴
-          mediums: ["청년인턴(체험형)", "청년인턴(채용형)"]
+          mediums: ["청년인턴(체험형)", "청년인턴(채용형)", 인턴]
         - code: contract
           name: 비정규직
-          mediums: [비정규직]
+          mediums: [비정규직, 기간제, 일반계약직, 전문계약직]
         - code: entry
           name: 신입 가능
           mediums: []
