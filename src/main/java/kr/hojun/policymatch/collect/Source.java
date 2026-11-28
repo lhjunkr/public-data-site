@@ -20,7 +20,10 @@ public enum Source {
     KSTARTUP("kstartup"),
 
     /** 마이홈 공공주택 모집공고 (국토교통부, 공공데이터포털). policy_no = rent-{pblancId}-{houseSn} · sale-{pblancId}-{houseSn}. */
-    MYHOME("myhome");
+    MYHOME("myhome"),
+
+    /** 잡알리오 공공기관 채용정보 (재정경제부, 공공데이터포털). policy_no = recrutPblntSn. */
+    ALIO("alio");
 
     private final String code;
 

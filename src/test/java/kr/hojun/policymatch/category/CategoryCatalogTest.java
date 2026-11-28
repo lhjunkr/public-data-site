@@ -1,6 +1,7 @@
 package kr.hojun.policymatch.category;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -51,6 +52,13 @@ class CategoryCatalogTest {
     void 열린_탭의_칩만_공개한다() {
         assertEquals(List.of("housing.rent", "housing.house", "education.skills"), catalog.openChipCodes());
         assertEquals(List.of("housing", "education"), catalog.openTabs().stream().map(Tab::code).toList());
+    }
+
+    @Test
+    void 모든_칩_목록에는_닫힌_탭의_칩도_설정_순서대로_있다() {
+        // 12/13: 화면 편입 전에 데이터부터 넣는 출처(잡알리오)는 닫힌 탭의 칩을 붙인다. 그 칩이 있는지 앱이 뜰 때 본다
+        assertEquals(List.of("housing.rent", "housing.house", "education.skills", "jobs.employment"), catalog.allChipCodes());
+        assertFalse(catalog.openChipCodes().contains("jobs.employment"));
     }
 
     @Test

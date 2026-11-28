@@ -2,7 +2,6 @@ package kr.hojun.policymatch.category;
 
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -23,6 +22,7 @@ public class CategoryCatalog {
 
     private final List<CategoryProperties.Tab> openTabs;
     private final List<String> openChipCodes;
+    private final List<String> allChipCodes;
     private final Map<String, String> chipByMedium;
 
     public CategoryCatalog(CategoryProperties props) {
@@ -30,7 +30,7 @@ public class CategoryCatalog {
             throw new IllegalStateException("category.tabs 가 비어 있습니다.");
         }
         Map<String, String> byMedium = new HashMap<>();
-        Set<String> chipCodes = new HashSet<>();
+        Set<String> chipCodes = new LinkedHashSet<>();
         List<CategoryProperties.Tab> open = new ArrayList<>();
         List<String> openChips = new ArrayList<>();
 
@@ -61,6 +61,7 @@ public class CategoryCatalog {
         }
         this.openTabs = List.copyOf(open);
         this.openChipCodes = List.copyOf(openChips);
+        this.allChipCodes = List.copyOf(chipCodes);
         this.chipByMedium = Map.copyOf(byMedium);
     }
 
@@ -90,6 +91,14 @@ public class CategoryCatalog {
     /** 열린 탭에 속한 칩 코드 (설정 순서). 매칭 결과는 이 칩을 하나라도 가진 정책만 낸다. */
     public List<String> openChipCodes() {
         return openChipCodes;
+    }
+
+    /**
+     * 닫힌 탭까지 포함한 모든 칩 코드 (설정 순서). 정규화기가 붙일 칩이 묶음표에 있는지 앱이 뜰 때 확인하는 데 쓴다.
+     * 화면 편입 전에 데이터부터 넣는 출처(잡알리오, 12/13 → 12/15)는 닫힌 탭의 칩을 붙이기 때문이다.
+     */
+    public List<String> allChipCodes() {
+        return allChipCodes;
     }
 
     /** 화면에 보일 탭 (설정 순서) */
