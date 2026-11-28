@@ -24,7 +24,7 @@ final class RecruitChips {
     /**
      * 앱이 뜰 때 확인한다: 신입 가능 칩이 있고, 측정된 고용형태 이름이 모두 공공기관 채용 탭의 칩에 들어 있는가.
      * 설정에서 칩이나 이름이 빠지면 공고가 조용히 분류 없이 들어가 화면에 안 나오므로, 배포가 실패하는 편이 낫다.
-     * 탭이 닫혀 있어도(12/15 전) 확인하므로 열린 칩이 아니라 모든 칩에서 찾는다.
+     * 탭을 닫아 둔 채 데이터부터 넣을 수도 있어(12/13 ~ 14) 열린 칩이 아니라 모든 칩에서 찾는다.
      */
     static void requireChips(CategoryCatalog categories, List<String> knownHireTypes, String sourceName) {
         if (!categories.allChipCodes().contains(ENTRY_CHIP)) {

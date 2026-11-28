@@ -14,10 +14,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import kr.hojun.policymatch.category.CategoryCatalog;
-import kr.hojun.policymatch.category.CategoryProperties;
-import kr.hojun.policymatch.category.CategoryProperties.Chip;
-import kr.hojun.policymatch.category.CategoryProperties.Tab;
 import kr.hojun.policymatch.match.IncomeStatus;
 import kr.hojun.policymatch.match.MatchedPolicy;
 import kr.hojun.policymatch.match.PolicyMatchRepository;
@@ -26,7 +22,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
 
@@ -46,7 +41,6 @@ class AlioNormalizerTest {
     private static final DateTimeFormatter YYYYMMDD = DateTimeFormatter.BASIC_ISO_DATE;
 
     @Autowired JdbcTemplate jdbc;
-    @Autowired NamedParameterJdbcTemplate namedJdbc;
     @Autowired ObjectMapper objectMapper;
     @Autowired AlioNormalizer normalizer;
     @Autowired PolicyMatchRepository matchRepository;
@@ -158,34 +152,35 @@ class AlioNormalizerTest {
     }
 
     @Test
-    void 공공기관_채용_탭이_닫혀_있는_동안은_검색에_나오지_않는다() {
-        // 화면 편입은 12/15. 그 전에 운영에 배포돼도 카드가 반쯤 만든 모양으로 보이지 않는다(D-018)
-        insertRaw(posting("T-AN-7", "정규직", "신입", "서울"), AT);
+    void 경력만_뽑는_비정규직_공고도_비정규직_칩으로_검색에_나온다() {
+        // 12/15: 칩 5개 한 줄(D-018 의 예외). 칩을 3개로 줄였다면 이 공고는 열린 칩이 없어 결과에서 빠진다
+        insertRaw(posting("T-AN-7", "비정규직", "경력", "서울"), AT);
         normalizer.normalize();
 
-        assertTrue(find(matchRepository.match(25, "11", null, null), "T-AN-7").isEmpty());
+        Optional<MatchedPolicy> found = find(matchRepository.match(25, "11", null, null), "T-AN-7");
+        assertTrue(found.isPresent());
+        assertEquals(List.of("recruit.contract"), found.get().categories());
     }
 
     @Test
-    void 탭을_열면_이십오세_서울_검색에_나오고_나이_소득_취업_조건으로_빠지지_않는다() {
-        // 12/15 에 탭을 열었을 때의 모습. 매칭 SQL 은 한 줄도 고치지 않았다(D-029 ③)
+    void 이십오세_서울_검색에_나오고_나이_소득_취업_조건으로_빠지지_않는다() {
+        // 12/15 에 공공기관 채용 탭을 열었다. 매칭 SQL 은 한 줄도 고치지 않았다(D-029 ③)
         insertRaw(posting("T-AN-8", "정규직", "신입+경력", "서울,경기"), AT);
         insertRaw(posting("T-AN-9", "비정규직", "신입", "부산"), AT);
         normalizer.normalize();
-        PolicyMatchRepository opened = new PolicyMatchRepository(namedJdbc, recruitOpenCatalog());
 
-        Optional<MatchedPolicy> found = find(opened.match(25, "11", null, null), "T-AN-8");
+        Optional<MatchedPolicy> found = find(matchRepository.match(25, "11", null, null), "T-AN-8");
         assertTrue(found.isPresent(), "근무지에 서울이 있으면 서울 검색에 나온다");
         assertEquals("alio", found.get().source());
         assertEquals(IncomeStatus.UNKNOWN, found.get().incomeStatus());
         assertTrue(found.get().needsCheck(), "지원 자격 글이 있어 '확인 필요'");
         assertTrue(found.get().categories().containsAll(List.of("recruit.regular", "recruit.entry")));
 
-        assertTrue(find(opened.match(25, "11", 3000L, "0013003"), "T-AN-8").isPresent(),
+        assertTrue(find(matchRepository.match(25, "11", 3000L, "0013003"), "T-AN-8").isPresent(),
                 "연소득 · 취업 상태를 넣어도 빠지지 않는다(제한없음)");
-        assertTrue(find(opened.match(45, "41", null, null), "T-AN-8").isPresent(), "나이 칸이 없어 45세 · 경기에도 나온다");
-        assertTrue(find(opened.match(25, "11", null, null), "T-AN-9").isEmpty(), "부산 공고는 서울에 안 나온다");
-        assertTrue(find(opened.match(25, "26", null, null), "T-AN-9").isPresent());
+        assertTrue(find(matchRepository.match(45, "41", null, null), "T-AN-8").isPresent(), "나이 칸이 없어 45세 · 경기에도 나온다");
+        assertTrue(find(matchRepository.match(25, "11", null, null), "T-AN-9").isEmpty(), "부산 공고는 서울에 안 나온다");
+        assertTrue(find(matchRepository.match(25, "26", null, null), "T-AN-9").isPresent());
     }
 
     @Test
@@ -318,15 +313,6 @@ class AlioNormalizerTest {
         raw.put("aplyQlfcCn", "자동차운전면허(2종이상)");
         raw.put("ongoingYn", "Y");
         return raw;
-    }
-
-    /** 12/15 에 공공기관 채용 탭을 열었을 때의 묶음표. 다른 탭은 이 시험과 상관없어 넣지 않는다 */
-    private static CategoryCatalog recruitOpenCatalog() {
-        return new CategoryCatalog(new CategoryProperties(List.of(
-                new Tab("recruit", "공공기관 채용", true, List.of(
-                        new Chip("regular", "정규직", List.of("정규직")),
-                        new Chip("contract", "비정규직", List.of("비정규직")),
-                        new Chip("entry", "신입 가능", List.of()))))));
     }
 
     private void insertRaw(Map<String, Object> raw, String fetchedAt) {

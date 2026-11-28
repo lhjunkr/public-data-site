@@ -305,6 +305,7 @@
   <p>정책 정보 출처: <a href="https://www.youthcenter.go.kr" target="_blank" rel="noopener noreferrer">온통청년</a> 청년정책 Open API (국무조정실 · 한국고용정보원)</p>
   <p>창업지원 공고 출처: <a href="https://www.k-startup.go.kr" target="_blank" rel="noopener noreferrer">K-Startup</a> 사업공고 조회서비스 (창업진흥원 · 공공데이터포털)</p>
   <p>공공주택 모집공고 출처: <a href="https://www.myhome.go.kr" target="_blank" rel="noopener noreferrer">마이홈</a> 공공주택 모집공고 조회 서비스 (국토교통부 · 공공데이터포털)</p>
+  <p>공공기관 채용 출처: <a href="https://job.alio.go.kr" target="_blank" rel="noopener noreferrer">잡알리오</a> 공공기관 채용정보 조회서비스 (재정경제부 · 공공데이터포털) · <a href="https://job.cleaneye.go.kr" target="_blank" rel="noopener noreferrer">클린아이 잡플러스</a> 지방공공기관 채용정보 조회서비스 (행정안전부 · 공공데이터포털)</p>
   <p id="updated"></p>
   <p>비영리 개인 프로젝트입니다. 정책 정보는 매일 새벽 원본에서 다시 받아 오며, 원본과 다를 수 있습니다.</p>
   <p><a href="/privacy.html"><strong>개인정보 처리방침</strong></a> · 문의 <a href="mailto:lhj020701@gmail.com">lhj020701@gmail.com</a></p>
@@ -459,9 +460,10 @@
       const list = await response.json();
       if (!Array.isArray(list)) return;
       catalog = list;
+      let order = 0;
       for (const tab of list) {
         for (const chip of (tab.chips || [])) {
-          chipInfo[chip.code] = { tab: tab, chip: chip };
+          chipInfo[chip.code] = { tab: tab, chip: chip, order: order++ };
         }
       }
     } catch (e) {
@@ -553,16 +555,34 @@
   }
 
   // 카드에 보일 분류: "주거 · 전월세" (묶음표 이름). 분류 정보가 없으면 원본 대분류 > 중분류
+  //  - 같은 탭의 칩이 여럿이면 탭 이름은 한 번만: "공공기관 채용 · 비정규직 · 신입 가능" (12/15)
+  //  - 공고형은 원본 분야(예: 사업화)를 칩 뒤에 붙인다: "일자리 · 창업 · 사업화". 칩 이름과 같은 값은 다시 붙이지 않는다
   function categoryLabel(policy) {
-    const names = [];
-    for (const code of chipsOf(policy)) {
+    const byTab = [];        // [{ name: "주거", chips: ["전월세", "주택"] }] 처음 나온 순서
+    const chipNames = [];
+    // 칩 코드는 API 에서 글자 순으로 온다. 화면은 묶음표 순서(정규직 → … → 신입 가능)로 적는다
+    const codes = chipsOf(policy).filter(function (c) { return chipInfo[c]; })
+      .sort(function (a, b) { return chipInfo[a].order - chipInfo[b].order; });
+    for (const code of codes) {
       const info = chipInfo[code];
-      if (info) names.push(info.tab.name + " · " + info.chip.name);
+      if (!info) continue;
+      let group = byTab.find(function (g) { return g.name === info.tab.name; });
+      if (!group) {
+        group = { name: info.tab.name, chips: [] };
+        byTab.push(group);
+      }
+      group.chips.push(info.chip.name);
+      chipNames.push(info.chip.name);
     }
-    if (names.length > 0) {
-      // 공고형은 원본 분야(예: 사업화)를 칩 뒤에 붙인다: "일자리 · 창업 · 사업화"
-      if (!isYouth(policy) && policy.categoryMedium) return names.join(", ") + " · " + policy.categoryMedium;
-      return names.join(", ");
+    if (byTab.length > 0) {
+      const label = byTab.map(function (g) { return [g.name].concat(g.chips).join(" · "); }).join(", ");
+      if (!isYouth(policy) && policy.categoryMedium) {
+        const extra = policy.categoryMedium.split(/\s*,\s*/).filter(function (m) {
+          return m && !chipNames.includes(m);
+        });
+        if (extra.length > 0) return label + " · " + extra.join(", ");
+      }
+      return label;
     }
     const large = policy.categoryLarge != null ? policy.categoryLarge : "";
     const medium = policy.categoryMedium != null ? policy.categoryMedium : "";
@@ -574,7 +594,9 @@
   // 원본에 소득 조건이 없으므로 소득 뱃지를 숨긴다("판단불가"가 모든 공고에 붙어 헷갈리지 않게).
   const SOURCE_LABEL = {
     kstartup: "출처: K-Startup 창업지원 공고",
-    myhome: "출처: 마이홈 공공주택 모집공고"
+    myhome: "출처: 마이홈 공공주택 모집공고",
+    alio: "출처: 잡알리오 공공기관 채용정보",
+    cleaneye: "출처: 클린아이 지방공공기관 채용정보"
   };
 
   function isYouth(policy) {

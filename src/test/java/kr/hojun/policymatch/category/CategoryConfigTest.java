@@ -46,17 +46,18 @@ class CategoryConfigTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].code").value("housing"))
                 .andExpect(jsonPath("$[0].chips[0].code").value("housing.rent"))
-                .andExpect(jsonPath("$.length()").value(5))            // D-021 로 일자리까지 5개 모두 열림
+                .andExpect(jsonPath("$.length()").value(6))            // D-021 로 일자리까지 5개 + 12/15 공공기관 채용
                 .andExpect(jsonPath("$[3].code").value("participation"))
-                .andExpect(jsonPath("$[4].code").value("jobs"));
+                .andExpect(jsonPath("$[4].code").value("jobs"))
+                .andExpect(jsonPath("$[5].code").value("recruit"));
     }
 
     @Test
-    void 공공기관_채용_탭은_화면_편입_전까지_닫혀_있고_칩은_있다() throws Exception {
-        // 12/13: 잡알리오 데이터부터 넣는다. 탭이 닫혀 있으면 분류 API 와 매칭 결과에 나오지 않는다(12/15 에 연다)
-        assertTrue(catalog.allChipCodes().containsAll(List.of(
-                "recruit.regular", "recruit.indefinite", "recruit.intern", "recruit.contract", "recruit.entry")));
-        assertTrue(catalog.openChipCodes().stream().noneMatch(code -> code.startsWith("recruit.")));
+    void 공공기관_채용_탭은_칩_5개를_고용형태_4개_신입_가능_순서로_준다() throws Exception {
+        // 12/15: 칩 5개 한 줄(D-018 의 예외, 사용자 결정). 칩을 줄이면 고용형태 칩이 없는 공고가 결과에서 빠진다
+        List<String> recruitChips = catalog.openChipCodes().stream().filter(code -> code.startsWith("recruit.")).toList();
+        assertEquals(List.of("recruit.regular", "recruit.indefinite", "recruit.contract", "recruit.intern", "recruit.entry"),
+                recruitChips);
         assertEquals(List.of("recruit.intern"), List.copyOf(catalog.chipsOf("청년인턴(체험형),청년인턴(채용형)")),
                 "체험형 · 채용형은 같은 청년인턴 칩");
         // 12/14: 지방공공기관의 다른 이름도 같은 칩으로 모인다
@@ -68,8 +69,12 @@ class CategoryConfigTest {
         MockMvc mvc = MockMvcBuilders.webAppContextSetup(context).build();
         mvc.perform(get("/api/v1/categories"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(5))
-                .andExpect(jsonPath("$[?(@.code == 'recruit')]").isEmpty());
+                .andExpect(jsonPath("$[5].name").value("공공기관 채용"))
+                .andExpect(jsonPath("$[5].chips.length()").value(5))
+                .andExpect(jsonPath("$[5].chips[0].name").value("정규직"))
+                .andExpect(jsonPath("$[5].chips[2].name").value("비정규직"))
+                .andExpect(jsonPath("$[5].chips[4].code").value("recruit.entry"))
+                .andExpect(jsonPath("$[5].chips[4].name").value("신입 가능"));
     }
 
     @Test
