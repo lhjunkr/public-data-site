@@ -42,6 +42,7 @@ class DataGoKrClientTest {
     private ExecutorService pool;
     private final AtomicInteger calls = new AtomicInteger();
     private final AtomicReference<String> lastRawQuery = new AtomicReference<>();
+    private final AtomicReference<String> lastAccept = new AtomicReference<>();
 
     @AfterEach
     void stop() {
@@ -140,6 +141,38 @@ class DataGoKrClientTest {
         assertTrue(e.getMessage().contains("시도=3"), "재시도까지 한 뒤 포기한다");
     }
 
+    @Test
+    void XML만_주는_기능은_XML을_달라고_보내고_본문을_그대로_준다() throws IOException {
+        // 12/14 지방공공기관 채용: 성공 · 결과 없음 · 오류가 모두 HTTP 200 + XML 이다. 결과 코드는 수집기가 읽는다
+        String xml = "<response><header><resultCode>3</resultCode><resultMsg>NONOTEXISTDATA_ERROR</resultMsg></header></response>";
+        DataGoKrClient client = client("test", call -> 200, xml, 0);
+
+        String body = client.getXml(Source.KSTARTUP, url(), Map.of("type", "xml"), "sidoCd=007005");
+
+        assertEquals(xml, body);
+        assertEquals("application/xml", lastAccept.get());
+        assertTrue(lastRawQuery.get().startsWith("serviceKey=test&type=xml"), lastRawQuery.get());
+    }
+
+    @Test
+    void XML_기능에_XML이_아닌_본문이_오면_실패한다() throws IOException {
+        DataGoKrClient client = client("test", call -> 200, OK_BODY, 0);
+
+        ExternalApiException e = assertThrows(ExternalApiException.class,
+                () -> client.getXml(Source.KSTARTUP, url(), Map.of(), "sidoCd=007001"));
+
+        assertTrue(e.getMessage().contains("XML 대신"), e.getMessage());
+    }
+
+    @Test
+    void JSON_기능은_JSON을_달라고_보낸다() throws IOException {
+        DataGoKrClient client = client("test", call -> 200, OK_BODY, 0);
+
+        client.getJson(Source.KSTARTUP, url(), Map.of(), "page=1");
+
+        assertEquals("application/json", lastAccept.get());
+    }
+
     // ---------- 도우미 ----------
 
     private String url() {
@@ -158,6 +191,7 @@ class DataGoKrClientTest {
         server.createContext("/", exchange -> {
             int status = statusFor.applyAsInt(calls.incrementAndGet());
             lastRawQuery.set(exchange.getRequestURI().getRawQuery());
+            lastAccept.set(exchange.getRequestHeaders().getFirst("Accept"));
             if (delayMs > 0) {
                 try {
                     Thread.sleep(delayMs);

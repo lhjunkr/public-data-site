@@ -136,6 +136,18 @@ public class PolicyStore {
                 """, String.class, source.code(), like, source.code(), like);
     }
 
+    /**
+     * 이 출처의 활성 · 마감 전 정책의 (기관, 제목). 다른 출처와 같은 공고가 있는지 세는 데만 쓴다(12/14, 합치지는 않는다).
+     */
+    public List<OrgTitle> openOrgTitles(Source source) {
+        return jdbc.query("""
+                SELECT supervising_org, title FROM policy
+                WHERE source = ? AND active = TRUE AND (apply_end_date IS NULL OR apply_end_date >= CURDATE())
+                """, (rs, rowNum) -> new OrgTitle(rs.getString(1), rs.getString(2)), source.code());
+    }
+
+    public record OrgTitle(String org, String title) {}
+
     /** 이 출처의 지금 활성 정책 수. 대량 비활성 상한의 기준이다. */
     public int countActive(Source source) {
         Integer n = jdbc.queryForObject("SELECT COUNT(*) FROM policy WHERE source = ? AND active = TRUE",

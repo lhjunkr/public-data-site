@@ -254,15 +254,15 @@ ORDER BY p.view_count DESC, p.id
 | 칸 | 온통청년 `youth` | K-Startup `kstartup` | 마이홈 `myhome` | 잡알리오 `alio` | 지방공공기관 `cleaneye` |
 |---|---|---|---|---|---|
 | `policy_no` | `plcyNo` | `pbanc_sn` | `rent-{pblancId}-{houseSn}` · `sale-…` | `recrutPblntSn` | `NO` |
-| `title` | `plcyNm` | `biz_pbanc_nm` | `pblancNm` | `recrutPbancTtl` | `ENT_TITLE` (+ `POSITION`) |
+| `title` | `plcyNm` | `biz_pbanc_nm` | `pblancNm` | `recrutPbancTtl` | `ENT_TITLE` (같은 공고 여러 행이면 + 직급 · 직무 분야 등 달라지는 값, 그래도 같으면 (n)) |
 | `supervising_org` | `sprvsnInstCdNm` | `pbanc_ntrp_nm` | `suplyInsttNm` | `instNm` | `ENT_NAME` |
 | `apply_start_date` · `apply_end_date` | `aplyYmd` 해석 | `pbanc_rcpt_bgng_dt` · `…end_dt` | `beginDe` · `endDe` | `pbancBgngYmd` · `pbancEndYmd` | `PUB_DATE` · `PUB_END_DATE` |
 | `min_age` · `max_age` | 원본 값 | 3구간을 합친 범위 | 비움 | 비움 | 비움 |
-| `policy_sido` | `zipCd` 앞 2자리 | `supt_regin` (`전국` → 16개, `sido.regions` 설정) | `brtcNm` (지역별 행) | `workRgnNmLst` (여러 값) | `SIDO_CD` |
-| `policy_category` | 중분류 → 칩 (D-018) | `jobs.startup` | `housing.public` 주거 · 공공임대·분양 (12/12, 12/11엔 `housing.house`) | `recruit` 탭(12/15까지 닫힘): 고용형태 → `recruit.regular` · `indefinite` · `intern` · `contract` + 신입 가능 `recruit.entry` (12/13) | 같은 탭 · 고용형태 이름만 설정에 추가 (12/14) |
+| `policy_sido` | `zipCd` 앞 2자리 | `supt_regin` (`전국` → 16개, `sido.regions` 설정) | `brtcNm` (지역별 행) | `workRgnNmLst` (여러 값) | `SIDO_CD` (시도 정식 이름 → 같은 `sido.regions` 설정. 요청에 쓰는 클린아이 코드 `007001`~는 저장하지 않음) |
+| `policy_category` | 중분류 → 칩 (D-018) | `jobs.startup` | `housing.public` 주거 · 공공임대·분양 (12/12, 12/11엔 `housing.house`) | `recruit` 탭(12/15까지 닫힘): 고용형태 → `recruit.regular` · `indefinite` · `intern` · `contract` + 신입 가능 `recruit.entry` (12/13) | 같은 탭 · 같은 칩: `일반정규직` → regular · `기간제` · `일반계약직` · `전문계약직` → contract · `인턴` → intern · `무기계약직` → indefinite (설정 `mediums`에 이름만 추가, 12/14). `비상임`(임원 공모)은 싣지 않음 |
 | `policy_job` | `jobCd` | `0013010` | `0013010` | `0013010` | `0013010` |
-| `extra_qualification` | 원문 | `aply_trgt_ctnt` | 고정 문구(자격은 공고문 확인) | `aplyQlfcCn` | 자격증 칸 |
-| 그 밖의 값 | 글 칸 · 원본 | 원본 | 공급유형 · 주택유형 · 임대료 → `support_content` | 고용형태 · 채용 구분 · 근무지 · 인원 · 학력 · 직무 · 대체인력 → `support_content` · 우대 사항 → `etc_matters` · 전형 안내(연락처 섞임)는 원본에만 | 고용형태 · 직급 · 연봉 → `support_content` |
+| `extra_qualification` | 원문 | `aply_trgt_ctnt` | 고정 문구(자격은 공고문 확인) | `aplyQlfcCn` | 지역 제한(`LOCAL_YN` · `LOCAL_NAME` · `LOCAL_REASON`) + 자격증 칸(`ENT_LICENSE1`~`4`). 둘 다 없으면 비움 |
+| 그 밖의 값 | 글 칸 · 원본 | 원본 | 공급유형 · 주택유형 · 임대료 → `support_content` | 고용형태 · 채용 구분 · 근무지 · 인원 · 학력 · 직무 · 대체인력 → `support_content` · 우대 사항 → `etc_matters` · 전형 안내(연락처 섞임)는 원본에만 | 고용형태 · 채용 구분 · 직급 · 직무 분야 · 인원 · 연봉 · 기관 유형 · 대체인력 · 모집 상태 · 직무 내용 · 전형 방법 → `support_content` · 제출 서류 → `required_documents` · 우대 → `etc_matters` · 신청하기 = 원본 `URL`(클린아이 원문) · 접수 방법 · 문의처 · 기타(메일 · 전화 섞임)는 원본에만 |
 
 - **마이홈 원본 묶기 (12/11):** 응답 한 행은 (공고, 주택, 지역)이다. 전 페이지를 받은 뒤 (공고, 주택)으로 묶어 `policy_raw` 한 행(`rent-{pblancId}-{houseSn}`)에 지역 행 배열을 담는다. 행마다 넣으면 유니크 키 때문에 마지막 지역만 남는다. `policy_sido`는 지역 행들의 `brtcNm` 합집합, 시군구 · 공급 호수는 `support_content`에만 둔다.
 - **잡알리오 (12/13):** 응답 한 건 = 공고 한 건이라 묶지 않는다. 고용형태 · 근무지는 콤마 여러 값 → 칩 · 시도 연결 여러 개. 원본 고용형태 이름 → 칩은 `application.yml`의 `recruit` 탭 `mediums`, 채용 구분에 '신입'이 있으면 `recruit.entry`. 신청하기 = 잡알리오 원문(`recruitview.do?idx={recrutPblntSn}`), 참고 링크 = 기관 채용 페이지(`srcUrl`). 마감 2050년 이후 = 상시. 11/28 로컬: 577건 · 시도 연결 774 · 칩 연결 1,153 · 지역/칩 없음 0.
@@ -289,7 +289,7 @@ ORDER BY p.view_count DESC, p.id
 | 같은 소스 안 | `(source, policy_no)` upsert | 몇 번 수집해도 행이 늘지 않는다 |
 | 마이홈 정정공고 | `beforePblancId`가 가리키는 이전 공고를 비활성 | 정정 81행 중 77행은 이전 공고도 함께 응답에 있다 |
 | 마이홈 ↔ LH 공고문 | **LH를 붙이지 않는다** (12/12 측정) | LH 주택 공고 105건 중 98건(93%)이 마이홈 `url`의 `panId`와 같고, 마이홈에 없는 입주자 모집 공고는 0건 ([`sources/lh.md`](sources/lh.md)) |
-| 잡알리오 ↔ 지방공공기관 | 합치지 않음 | 기관 이름 겹침 0 |
+| 잡알리오 ↔ 지방공공기관 | 합치지 않음. 정규화마다 기관 이름 · (기관, 제목)이 같은 행을 세어 로그에 남김 (12/14) | 같은 식별자가 없다. 기관 이름 겹침 0(12/5) → 11/28 실측: 기관 이름 같음 0 · 한쪽이 다른 쪽을 포함 0 · 제목 같음 0 |
 | 온통청년 ↔ K-Startup | 마감 전 활성 온통청년 정책의 주소가 K-Startup 공고 번호(`pbancSn`)를 가리킬 때만 K-Startup 쪽을 싣지 않음 (12/10) | 같은 번호면 같은 공고다. 그 밖에는 제도와 회차 공고라 둘 다 보인다 |
 | 그 밖 | **제목이 비슷하다고 합치지 않는다** | 잘못 합치면 공고가 사라진다. 빠뜨리는 것이 더 나쁘다 (D-001 · D-003) |
 
@@ -299,7 +299,7 @@ ORDER BY p.view_count DESC, p.id
 |---|---|
 | 마지막 성공 수집 | `collect_run`에서 **같은 `source`의** 마지막 `SUCCESS` |
 | 비활성 처리 | 그 소스의 행만. 한 소스의 수집 성공이 다른 소스의 행을 비활성하지 않는다 |
-| 성공 기준 | 온통청년 · K-Startup · 마이홈 · 잡알리오: API 전체 건수의 95% 이상(D-017). 지방공공기관: 전체 건수가 늘 `0`이라 **17개 시도가 모두 응답**하면 성공 |
+| 성공 기준 | 온통청년 · K-Startup · 마이홈 · 잡알리오: API 전체 건수의 95% 이상(D-017). 지방공공기관: 전체 건수가 늘 `0`이라 **요청한 시도 코드(`007001`~`007020`, 20개)가 모두 응답**(결과 코드 0 = 성공 또는 3 = 그 시도에 공고 없음)하면 성공. 하나라도 다른 코드 · HTTP 오류이거나 전체 0건이면 실패 |
 
 ### 변경 후 구조
 

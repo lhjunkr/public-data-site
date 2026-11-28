@@ -49,12 +49,6 @@ public class AlioNormalizer implements SourceNormalizer {
     private static final Logger log = LoggerFactory.getLogger(AlioNormalizer.class);
     private static final Source SOURCE = Source.ALIO;
 
-    /** 공공기관 채용 탭 (application.yml 의 category.tabs). 칩 코드는 "recruit.칩" */
-    static final String TAB_PREFIX = "recruit.";
-    /** 채용 구분에 '신입'이 있는 공고에 붙인다. 원본 이름 매핑이 없는 칩이다(mediums: []) */
-    static final String ENTRY_CHIP = "recruit.entry";
-    static final String CATEGORY_LARGE = "공공기관 채용";
-
     /** 12/5 측정에서 나온 고용형태 5종. 묶음표에서 하나라도 칩을 잃으면 앱이 뜨지 않게 한다. */
     static final List<String> KNOWN_HIRE_TYPES = List.of("정규직", "무기계약직", "비정규직", "청년인턴(체험형)", "청년인턴(채용형)");
 
@@ -81,20 +75,10 @@ public class AlioNormalizer implements SourceNormalizer {
 
     /**
      * 칩을 묶음표로 정하므로, 묶음표에서 칩이 사라지면 공고가 조용히 분류 없이 들어간다(12/15 에 탭을 열어도 안 보임).
-     * 그래서 앱이 뜰 때 신입 가능 칩과 측정된 고용형태 5종의 칩이 공공기관 채용 탭에 있는지 확인한다(K-Startup · 마이홈과 같은 방식).
-     * 탭은 아직 닫혀 있으므로 열린 칩이 아니라 모든 칩에서 찾는다.
+     * 그래서 앱이 뜰 때 신입 가능 칩과 측정된 고용형태 5종의 칩이 공공기관 채용 탭에 있는지 확인한다(RecruitChips).
      */
     public AlioNormalizer(PolicyStore store, SidoNames sidoNames, ObjectMapper objectMapper, CategoryCatalog categories) {
-        if (!categories.allChipCodes().contains(ENTRY_CHIP)) {
-            throw new IllegalStateException("잡알리오 칩 " + ENTRY_CHIP + " 이(가) 묶음표에 없습니다. "
-                    + "application.yml 의 category.tabs 를 확인하십시오.");
-        }
-        for (String hireType : KNOWN_HIRE_TYPES) {
-            if (hireTypeChips(categories, hireType).isEmpty()) {
-                throw new IllegalStateException("잡알리오 고용형태 '" + hireType + "' 이(가) 공공기관 채용 탭의 칩에 없습니다. "
-                        + "application.yml 의 category.tabs(recruit)를 확인하십시오.");
-            }
-        }
+        RecruitChips.requireChips(categories, KNOWN_HIRE_TYPES, "잡알리오");
         this.store = store;
         this.sidoNames = sidoNames;
         this.objectMapper = objectMapper;
@@ -155,14 +139,14 @@ public class AlioNormalizer implements SourceNormalizer {
             }
 
             String hireTypes = text(n, "hireTypeNmLst");
-            Set<String> chips = hireTypeChips(categories, hireTypes);
+            Set<String> chips = RecruitChips.hireTypeChips(categories, hireTypes);
             for (String name : split(hireTypes)) {
-                if (hireTypeChips(categories, name).isEmpty()) {
+                if (RecruitChips.hireTypeChips(categories, name).isEmpty()) {
                     unknownHireTypes.add(name);
                 }
             }
-            if (isEntryOpen(text(n, "recrutSeNm"))) {
-                chips.add(ENTRY_CHIP);
+            if (RecruitChips.isEntryOpen(text(n, "recrutSeNm"))) {
+                chips.add(RecruitChips.ENTRY_CHIP);
             }
             if (chips.isEmpty()) {
                 // 칩이 없으면 탭을 열어도 결과에 나오지 않는다(D-018). 싣기는 하고 수를 남긴다
@@ -246,7 +230,7 @@ public class AlioNormalizer implements SourceNormalizer {
         return new PolicyRow(
                 policyNo,
                 TextCleaner.clean(text(n, "recrutPbancTtl")),
-                CATEGORY_LARGE,
+                RecruitChips.CATEGORY_LARGE,
                 spaced(text(n, "hireTypeNmLst")),
                 null,
                 null,
@@ -274,7 +258,7 @@ public class AlioNormalizer implements SourceNormalizer {
     String supportContent(JsonNode n) {
         StringBuilder out = new StringBuilder();
         line(out, "고용형태", spaced(text(n, "hireTypeNmLst")));
-        line(out, "채용 구분", recruitType(text(n, "recrutSeNm")));
+        line(out, "채용 구분", RecruitChips.recruitTypeText(text(n, "recrutSeNm")));
         line(out, "근무지", spaced(text(n, "workRgnNmLst")));
         String people = text(n, "recrutNope");
         line(out, "채용 인원", people == null || !people.strip().matches("[1-9]\\d*") ? null : people.strip() + "명");
@@ -297,27 +281,6 @@ public class AlioNormalizer implements SourceNormalizer {
     private String preference(JsonNode n) {
         String pref = TextCleaner.clean(text(n, "prefCn"));
         return pref != null ? pref : TextCleaner.clean(text(n, "prefCondCn"));
-    }
-
-    /** 고용형태 이름(콤마 여러 값)을 공공기관 채용 탭의 칩으로. 다른 탭의 칩은 붙이지 않는다(이름이 우연히 겹쳐도). */
-    static Set<String> hireTypeChips(CategoryCatalog categories, String hireTypes) {
-        Set<String> chips = new LinkedHashSet<>();
-        for (String chip : categories.chipsOf(hireTypes)) {
-            if (chip.startsWith(TAB_PREFIX)) {
-                chips.add(chip);
-            }
-        }
-        return chips;
-    }
-
-    /** 신입 · 신입+경력 → 신입 지원 가능. 경력만이면 아니다. */
-    static boolean isEntryOpen(String recruitType) {
-        return recruitType != null && recruitType.contains("신입");
-    }
-
-    /** "신입+경력" → "신입 + 경력" */
-    private static String recruitType(String value) {
-        return value == null ? null : value.strip().replaceAll("\\s*\\+\\s*", " + ");
     }
 
     /** 잡알리오 공고 원문 주소. 번호가 숫자일 때만 만든다. */

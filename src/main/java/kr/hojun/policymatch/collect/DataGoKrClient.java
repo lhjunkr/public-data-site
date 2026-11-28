@@ -18,7 +18,8 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * 공공데이터포털(apis.data.go.kr) API 를 부르는 공통 클라이언트. K-Startup 부터 쓰고, 마이홈 · 잡알리오도 같은 것을 쓴다.
+ * 공공데이터포털(apis.data.go.kr) API 를 부르는 공통 클라이언트. K-Startup 부터 쓰고, 마이홈 · 잡알리오 · 지방공공기관도 같은 것을 쓴다.
+ * 지방공공기관 채용 기능은 XML 만 주므로(12/5) getXml 을 따로 둔다. 인증키 · 재시도 · 키 가림은 두 방식이 같다.
  *
  * 출처별 수집기는 "주소 + 파라미터"만 넘기고, 여기서 다음을 맡는다.
  *  1) 인증키를 정확히 한 번 인코딩한다. 키에 든 '+' 를 그대로 보내면 서버가 공백으로 읽어
@@ -64,24 +65,7 @@ public class DataGoKrClient {
      * @param label  로그 · 오류에 붙일 위치 표시 (예: "page=2")
      */
     public JsonNode getJson(Source source, String url, Map<String, String> params, String label) {
-        String key = props.getKey();
-        if (key == null || key.isBlank()) {
-            throw new ExternalApiException(source,
-                    "data-go-kr.key 가 비어 있습니다. .env 에 DATA_GO_KR_KEY(공공데이터포털 일반 인증키 Decoding 값)를 설정하십시오.");
-        }
-        if (key.contains("%")) {
-            throw new ExternalApiException(source,
-                    "DATA_GO_KR_KEY 가 Encoding 값으로 보입니다('%' 포함). 두 번 인코딩되어 인증에 실패하므로 Decoding 값을 넣으십시오.");
-        }
-
-        URI uri = buildUri(url, key, params);
-        byte[] bytes = getWithRetry(source, uri, label);
-        // 응답 헤더에 문자 집합이 없을 때 기본값(ISO-8859-1)으로 읽어 한글이 깨지지 않게, 바이트로 받아 UTF-8 로 직접 읽는다
-        String body = bytes == null ? "" : new String(bytes, StandardCharsets.UTF_8);
-
-        if (body.isBlank()) {
-            throw new ExternalApiException(source, "응답 본문이 비어 있습니다 (" + label + ")");
-        }
+        String body = getBody(source, url, params, label, "application/json");
         String trimmed = body.stripLeading();
         if (trimmed.startsWith("<")) {
             throw new ExternalApiException(source, "JSON 대신 XML 이 돌아왔습니다 (" + label + "). 공공데이터포털 오류 응답입니다"
@@ -93,6 +77,44 @@ public class DataGoKrClient {
         } catch (RuntimeException e) {
             throw new ExternalApiException(source, "JSON 파싱 실패 (" + label + "). 앞부분: " + head(trimmed));
         }
+    }
+
+    /**
+     * XML 만 주는 기능(지방공공기관 채용, 12/14)을 부르고 본문을 글자 그대로 돌려준다.
+     * 이 기능은 성공 · 결과 없음 · 오류가 모두 HTTP 200 + XML 이라, 결과 코드는 수집기가 읽는다(기능마다 모양이 다르다).
+     * 본문이 '<' 로 시작하지 않으면(JSON 등) 여기서 실패한다. HTML 오류 화면처럼 '<' 로 시작하는 것은
+     * 수집기가 "결과 코드가 없다"로 걸러낸다.
+     */
+    public String getXml(Source source, String url, Map<String, String> params, String label) {
+        String body = getBody(source, url, params, label, "application/xml");
+        String trimmed = body.stripLeading();
+        if (!trimmed.startsWith("<")) {
+            throw new ExternalApiException(source, "XML 대신 다른 형식이 돌아왔습니다 (" + label + "). 앞부분: " + head(trimmed));
+        }
+        return body;
+    }
+
+    /** 인증키 확인 → 주소 만들기 → GET(재시도) → UTF-8 본문. 두 형식이 함께 쓴다. */
+    private String getBody(Source source, String url, Map<String, String> params, String label, String accept) {
+        String key = props.getKey();
+        if (key == null || key.isBlank()) {
+            throw new ExternalApiException(source,
+                    "data-go-kr.key 가 비어 있습니다. .env 에 DATA_GO_KR_KEY(공공데이터포털 일반 인증키 Decoding 값)를 설정하십시오.");
+        }
+        if (key.contains("%")) {
+            throw new ExternalApiException(source,
+                    "DATA_GO_KR_KEY 가 Encoding 값으로 보입니다('%' 포함). 두 번 인코딩되어 인증에 실패하므로 Decoding 값을 넣으십시오.");
+        }
+
+        URI uri = buildUri(url, key, params);
+        byte[] bytes = getWithRetry(source, uri, label, accept);
+        // 응답 헤더에 문자 집합이 없을 때 기본값(ISO-8859-1)으로 읽어 한글이 깨지지 않게, 바이트로 받아 UTF-8 로 직접 읽는다
+        String body = bytes == null ? "" : new String(bytes, StandardCharsets.UTF_8);
+
+        if (body.isBlank()) {
+            throw new ExternalApiException(source, "응답 본문이 비어 있습니다 (" + label + ")");
+        }
+        return body;
     }
 
     /**
@@ -116,12 +138,12 @@ public class DataGoKrClient {
         return text == null ? null : text.replaceAll("serviceKey=[^&\"\\s]+", "serviceKey=***");
     }
 
-    private byte[] getWithRetry(Source source, URI uri, String label) {
+    private byte[] getWithRetry(Source source, URI uri, String label, String accept) {
         String lastFailure = "알 수 없음";
 
         for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
             try {
-                return restClient.get().uri(uri).retrieve().body(byte[].class);
+                return restClient.get().uri(uri).header("Accept", accept).retrieve().body(byte[].class);
 
             } catch (HttpClientErrorException e) {
                 // 4xx — 429(요청 과다)만 다시 시도한다. 인증 · 주소 오류는 몇 번을 보내도 같다
