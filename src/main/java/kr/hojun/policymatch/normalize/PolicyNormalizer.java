@@ -108,8 +108,10 @@ public class PolicyNormalizer implements SourceNormalizer {
             "UPDATE policy SET active = FALSE WHERE source = ? AND active = TRUE AND policy_no NOT IN (%s)";
 
     /** DEACTIVATE_OTHERS 가 바꿀 행 수. 조건이 같아야 하므로 WHERE 를 그대로 쓴다. 바꾸기 전에 상한을 확인하는 데 쓴다. */
+    /** 비활성될 정책 중 마감 전인 것(마감일이 없거나 오늘 이후)만 센다. 마감일이 지나 빠진 것은 정상이다(D-019 "12/16 추가") */
     private static final String COUNT_TO_DEACTIVATE =
-            "SELECT COUNT(*) FROM policy WHERE source = ? AND active = TRUE AND policy_no NOT IN (%s)";
+            "SELECT COUNT(*) FROM policy WHERE source = ? AND active = TRUE"
+                    + " AND (apply_end_date IS NULL OR apply_end_date >= CURDATE()) AND policy_no NOT IN (%s)";
 
     private final JdbcTemplate jdbc;
     private final ObjectMapper objectMapper;

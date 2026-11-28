@@ -14,7 +14,7 @@ public class MassDeactivationException extends RuntimeException {
     private final int limit;
 
     public MassDeactivationException(Source source, int activeBefore, int toDeactivate, int limit) {
-        super("비활성 예정 " + toDeactivate + "건이 상한 " + limit + "건(활성 " + activeBefore + "건의 "
+        super("마감 전 비활성 예정 " + toDeactivate + "건이 상한 " + limit + "건(활성 " + activeBefore + "건의 "
                 + MassDeactivationGuard.MAX_PERCENT + "%, 최소 " + MassDeactivationGuard.MIN_LIMIT
                 + "건)을 넘어 반영하지 않습니다. 출처: " + source.code());
         this.source = source;

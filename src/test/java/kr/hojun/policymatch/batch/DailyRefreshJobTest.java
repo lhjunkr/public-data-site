@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Supplier;
 import kr.hojun.policymatch.alert.FakeAlertSender;
@@ -18,7 +19,7 @@ import kr.hojun.policymatch.normalize.PolicyNormalizer;
 import org.junit.jupiter.api.Test;
 
 /**
- * 매일 갱신이 언제 알림을 보내는가 (D-026).
+ * 매일 갱신이 언제 알림을 보내는가 (D-026), 출처별로 도는가 (12/16).
  * 진짜 수집 · 정규화 대신 정해진 대로 성공하거나 실패하는 가짜 PolicyBatch, 진짜 디스코드 대신 가짜 알림을 쓴다.
  */
 class DailyRefreshJobTest {
@@ -32,6 +33,55 @@ class DailyRefreshJobTest {
 
     private void runWith(Supplier<RefreshResult> behavior) {
         new DailyRefreshJob(new FakeBatch(behavior), alert).run();
+    }
+
+    private FakeBatch runWith(Source source, Supplier<RefreshResult> behavior) {
+        FakeBatch batch = new FakeBatch(behavior);
+        new DailyRefreshJob(batch, alert).run(source);
+        return batch;
+    }
+
+    @Test
+    void 출처를_받으면_그_출처만_갱신한다() {
+        FakeBatch batch = runWith(Source.ALIO, () -> OK);
+
+        assertEquals(List.of(Source.ALIO), batch.called);
+    }
+
+    @Test
+    void 출처를_안_주면_온통청년을_갱신한다() {
+        // 12/16 이전 이름(run())을 남겼다. 관리 API · 기존 호출과 같은 동작
+        FakeBatch batch = new FakeBatch(() -> OK);
+        new DailyRefreshJob(batch, alert).run();
+
+        assertEquals(List.of(Source.YOUTH), batch.called);
+    }
+
+    @Test
+    void 실패_알림에_어느_출처인지_적는다() {
+        // 한 출처만 실패하면 그 출처만 어제 데이터로 남는다. 알림만 보고 어느 것을 볼지 알아야 한다
+        runWith(Source.CLEANEYE, () -> {
+            throw new ExternalApiException(Source.CLEANEYE, "API 응답 오류 (sidoCd=007001) resultCode=99");
+        });
+
+        assertEquals(1, alert.sent.size());
+        String text = alert.sent.get(0);
+        assertTrue(text.contains("매일 갱신 실패"));
+        assertTrue(text.contains("지방공공기관(cleaneye)"), "출처 이름과 코드");
+        assertTrue(text.contains("sidoCd=007001"), "어디서 실패했는지");
+    }
+
+    @Test
+    void 대량_비활성_알림의_강제_반영_주소에_출처를_넣는다() {
+        // 출처를 빼고 부르면 온통청년(youth)이 강제 반영된다. 복사해서 그대로 부를 수 있게 출처를 넣는다
+        runWith(Source.ALIO, () -> {
+            throw new MassDeactivationException(Source.ALIO, 570, 108, 57);
+        });
+
+        String text = alert.sent.get(0);
+        assertTrue(text.contains("잡알리오(alio)"));
+        assertTrue(text.contains("마감 전 비활성 예정 108건"));
+        assertTrue(text.contains("normalize?source=alio&force=true"));
     }
 
     @Test
@@ -106,6 +156,7 @@ class DailyRefreshJobTest {
     /** 수집 · 정규화를 하지 않고 정해진 대로 성공하거나 실패한다 */
     private static class FakeBatch extends PolicyBatch {
         private final Supplier<RefreshResult> behavior;
+        final List<Source> called = new ArrayList<>();
 
         FakeBatch(Supplier<RefreshResult> behavior) {
             // 배치는 온통청년 수집기 · 정규화기가 있어야 만들어진다(12/9 · 12/10). 이 가짜는 refresh 만 쓰므로 빈 껍데기를 넘긴다
@@ -115,6 +166,12 @@ class DailyRefreshJobTest {
 
         @Override
         public RefreshResult refresh() {
+            return refresh(Source.YOUTH);
+        }
+
+        @Override
+        public RefreshResult refresh(Source source) {
+            called.add(source);
             return behavior.get();
         }
     }

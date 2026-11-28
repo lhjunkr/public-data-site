@@ -202,6 +202,25 @@ class AlioNormalizerTest {
     }
 
     @Test
+    void 마감일이_지난_공고가_한꺼번에_빠져도_상한에_걸리지_않는다() {
+        // 11/28 실측: 12/4 하루에 108건 마감 → 다음 날 진행 중 응답에서 빠짐 > 상한 57건. 마감 전에 사라진 것만 센다(12/16)
+        NormalizeResult result = disappearAtOnce(dbToday().minusDays(1));
+
+        assertEquals(51, result.deactivated(), "비활성은 그대로 한다");
+        assertEquals(Boolean.TRUE, active("T-AN-E-NEW"));
+    }
+
+    @Test
+    void 마감_전_공고가_한꺼번에_빠지면_반영하지_않고_멈춘다() {
+        // 데이터가 깨져 사라지는 공고는 대부분 마감 전이다. 이 경우는 여전히 잡는다
+        MassDeactivationException e = assertThrows(MassDeactivationException.class,
+                () -> disappearAtOnce(dbToday().plusDays(5)));
+
+        assertEquals(51, e.toDeactivate());
+        assertEquals(Boolean.TRUE, active("T-AN-E0"), "멈췄으므로 비활성하지 않았다");
+    }
+
+    @Test
     void 같은_기관_같은_제목이어도_공고_번호가_다르면_둘_다_싣는다() {
         // 12/5: 같은 기관 · 같은 제목 15묶음 51건(재공고 · 상시 공고). 제목으로 합치지 않는다(D-029 ⑤)
         Map<String, Object> a = posting("T-AN-12", "비정규직", "신입", "경남");
@@ -295,6 +314,27 @@ class AlioNormalizerTest {
     }
 
     // ---------- 도우미 ----------
+
+    /** DB 기준 오늘. 상한 쿼리가 DB 의 CURDATE() 로 비교한다 */
+    private LocalDate dbToday() {
+        return jdbc.queryForObject("SELECT CURDATE()", java.sql.Date.class).toLocalDate();
+    }
+
+    /** 마감일이 end 인 공고 51건 + 새 공고 1건을 싣고, 다음 수집에서 새 공고만 보였을 때 정규화한다(상한 = max(50, 52의 10%) = 50) */
+    private NormalizeResult disappearAtOnce(LocalDate end) {
+        for (int i = 0; i < 51; i++) {
+            Map<String, Object> raw = posting("T-AN-E" + i, "비정규직", "신입", "서울");
+            raw.put("pbancEndYmd", end.format(YYYYMMDD));
+            insertRaw(raw, AT);
+        }
+        insertRaw(posting("T-AN-E-NEW", "정규직", "신입", "서울"), AT);
+        normalizer.normalize();
+
+        jdbc.update("INSERT INTO collect_run (source, started_at, finished_at, status) VALUES ('alio', ?, ?, 'SUCCESS')",
+                LATER, LATER);
+        jdbc.update("UPDATE policy_raw SET fetched_at = ? WHERE source = 'alio' AND policy_no = 'T-AN-E-NEW'", LATER);
+        return normalizer.normalize();
+    }
 
     /** 실제 응답에서 쓰는 칸만 채운 공고 한 건. 마감은 30일 뒤 */
     private Map<String, Object> posting(String no, String hireTypes, String recruitType, String regions) {

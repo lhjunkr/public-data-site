@@ -17,6 +17,11 @@ import kr.hojun.policymatch.collect.Source;
  * 때 매일 갱신이 계속 멈추기 때문이다.
  *
  * 상한 아래에서 일어나는 부분 손실(예: 분류 하나가 통째로 빠짐 = 5% 안팎)은 여기서 잡지 못한다.
+ *
+ * 12/16 추가: 비활성 예정 건수는 "마감 전에 사라진 것"만 센다(PolicyStore · PolicyNormalizer 의 countToDeactivate).
+ * 공고형 출처는 마감일이 몰린 날 정상적으로 많이 빠진다(11/28 실측: 잡알리오 12/4 마감 108건 > 상한 57건,
+ * 지방공공기관 12/7 마감 72건 > 상한 52건). 마감일이 지나 빠진 것까지 세면 그런 날마다 매일 갱신이 멈춘다.
+ * 데이터가 깨져 사라지는 공고는 대부분 마감 전이므로 이 상한으로 여전히 잡힌다.
  */
 public final class MassDeactivationGuard {
 

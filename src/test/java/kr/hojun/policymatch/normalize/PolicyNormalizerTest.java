@@ -243,6 +243,27 @@ class PolicyNormalizerTest {
                 Integer.class));
     }
 
+    @Test
+    void 마감일이_지난_정책은_한꺼번에_빠져도_상한에_세지_않는다() {
+        // 12/16: 마감일이 지나 원본에서 빠진 것은 정상이다. 마감 전에 사라진 것만 상한에 센다(D-019 "12/16 추가")
+        activeMissingFromRaw(MassDeactivationGuard.MIN_LIMIT + 1, dbToday().minusDays(1));
+
+        NormalizeResult result = normalizer.normalize();
+
+        assertEquals(51, result.deactivated(), "비활성은 그대로 한다");
+        assertEquals(0, countActive("T-N-OLD-%"));
+    }
+
+    @Test
+    void 오늘이_마감인_정책은_상한에_센다() {
+        // 오늘까지 신청할 수 있는 정책이 사라졌다면 정상 마감이 아니다
+        activeMissingFromRaw(MassDeactivationGuard.MIN_LIMIT + 1, dbToday());
+
+        MassDeactivationException e = assertThrows(MassDeactivationException.class, normalizer::normalize);
+
+        assertEquals(51, e.toDeactivate());
+    }
+
     // ---------- 수집 기록 기준 (D-017) ----------
 
     @Test
@@ -351,6 +372,19 @@ class PolicyNormalizerTest {
         for (int i = 0; i < n; i++) {
             jdbc.update("INSERT INTO policy (source, policy_no, title) VALUES ('youth', ?, '이번 원본에 없는 정책')",
                     "T-N-OLD-" + i);
+        }
+    }
+
+    /** DB 기준 오늘. 상한 쿼리가 DB 의 CURDATE() 로 비교하므로 JVM 날짜가 아니라 이것을 쓴다(CI 는 UTC, 로컬은 +09:00) */
+    private java.time.LocalDate dbToday() {
+        return jdbc.queryForObject("SELECT CURDATE()", java.sql.Date.class).toLocalDate();
+    }
+
+    /** 마감일이 있는 정책 n건이 이번 원본에 없다 */
+    private void activeMissingFromRaw(int n, java.time.LocalDate applyEnd) {
+        for (int i = 0; i < n; i++) {
+            jdbc.update("INSERT INTO policy (source, policy_no, title, apply_end_date) VALUES ('youth', ?, '이번 원본에 없는 정책', ?)",
+                    "T-N-OLD-" + i, java.sql.Date.valueOf(applyEnd));
         }
     }
 
